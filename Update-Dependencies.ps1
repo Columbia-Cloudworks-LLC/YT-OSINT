@@ -29,6 +29,9 @@ function Set-ProtectedDirectory([string]$Path,[switch]$Readable) {
 if($NativeCommit -or $RecoverNative){
     $admin=([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
     if(-not $admin){throw 'The native update helper must run elevated.'}
+    # Keep a helper-owned lock even if the unelevated parent exits during UAC/commit.
+    # Process exit releases it, including abnormal termination; the journal handles recovery.
+    $nativeCommitLock=Enter-CorpusDependencyLock -Commit
     $protected=Join-Path $env:SystemRoot 'YT-OSINT-Updates'
     Set-ProtectedDirectory $protected -Readable
     Set-ProtectedDirectory (Join-Path $protected 'results') -Readable
@@ -63,6 +66,16 @@ if($NativeCommit -or $RecoverNative){
             Assert-CorpusDependencyDigest $archive $release
             $candidate=Join-Path $transactionRoot 'candidate'
             Expand-CorpusDependency $archive $candidate $plan.Name
+            # New files moved out of protected staging must be executable by ordinary users.
+            foreach($file in @(Get-CorpusNativeNames $plan.Name)){
+                $fileAcl=[Security.AccessControl.FileSecurity]::new()
+                $fileAcl.SetAccessRuleProtection($true,$false)
+                foreach($sid in @('S-1-5-18','S-1-5-32-544')){
+                    $fileAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid),'FullControl','Allow'))
+                }
+                $fileAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'),'ReadAndExecute','Allow'))
+                [IO.File]::SetAccessControl((Join-Path $candidate $file),$fileAcl)
+            }
             Install-CorpusNativeTransaction $ctx $plan.Name $candidate $release.Version $env:SystemRoot $transactionRoot $journalPath $plan.Baseline
             # Large downloaded archives are no longer needed; backups and the journal remain.
             [IO.File]::Delete($archive)

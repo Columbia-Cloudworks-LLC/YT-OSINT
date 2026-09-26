@@ -10,8 +10,10 @@ function Get-CorpusDependencySettings {
 }
 
 function Enter-CorpusDependencyLock {
+    param([switch]$Commit)
     # Shared by all YT-OSINT corpora in this Windows session. No waiting on the UI thread.
-    $mutex=[Threading.Mutex]::new($false,'Local\YTOSINT-DependencyMaintenance')
+    $mutexName=if($Commit){'Local\YTOSINT-DependencyCommit'}else{'Local\YTOSINT-DependencyMaintenance'}
+    $mutex=[Threading.Mutex]::new($false,$mutexName)
     try {
         try {$acquired=$mutex.WaitOne(0)} catch [Threading.AbandonedMutexException] {$acquired=$true}
         if(-not $acquired){throw 'Another YT-OSINT process is using or updating dependencies. Retry when it is idle.'}
@@ -34,7 +36,9 @@ function Get-CorpusDependencyText {
     param([string]$Url)
     if(([uri]$Url).Scheme -ne 'https'){throw 'Dependency metadata requires HTTPS.'}
     [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
-    return (Invoke-WebRequest -Uri $Url -UseBasicParsing -Headers @{'User-Agent'='YT-OSINT'} -TimeoutSec 30 -ErrorAction Stop).Content
+    $response=Invoke-WebRequest -Uri $Url -UseBasicParsing -Headers @{'User-Agent'='YT-OSINT'} -TimeoutSec 30 -ErrorAction Stop
+    if($response.Content -is [byte[]]){return [Text.Encoding]::UTF8.GetString($response.Content)}
+    return [string]$response.Content
 }
 
 function Get-CorpusDependencyRelease {
@@ -79,7 +83,8 @@ function Get-CorpusNativeVersion {
     $r=Invoke-CorpusProcess $Context $Path @($arg) -TimeoutSeconds 30 -Quiet
     if($r.ExitCode -ne 0){throw "$Name version check failed (exit $($r.ExitCode))."}
     $line=($r.StdOut -split '\r?\n')[0].Trim()
-    if($line -notmatch '\d+\.\d+'){throw "$Name returned an unrecognized version."}
+    $pattern=if($Name -in @('ffmpeg','ffprobe')){'^(?:ffmpeg|ffprobe) version \S+'}elseif($Name -eq 'deno'){'^deno \d+\.\d+'}else{'^\d{4}\.\d{2}\.\d{2}'}
+    if($line -notmatch $pattern){throw "$Name returned an unrecognized version."}
     return $line
 }
 
@@ -133,9 +138,11 @@ function Get-CorpusDependencyRecovery {
 function Get-CorpusDependencyStatus {
     param($Context,[ValidateSet('stable','nightly')][string]$Channel='stable',[switch]$Force)
     $lock=Enter-CorpusDependencyLock
+    $commitLock=$null
     try {
+        $commitLock=Enter-CorpusDependencyLock -Commit
         $cachePath=Join-Path $Context.Root 'data/dependencies/checks.json'
-        $cache=Read-CorpusJson $cachePath
+        $cache=@(Read-CorpusJson $cachePath @())
         $pending=@(Get-CorpusDependencyRecovery)
         $rows=@()
         foreach($name in $script:DependencyNames){
@@ -167,7 +174,7 @@ function Get-CorpusDependencyStatus {
         }
         Write-CorpusJson $cachePath $cache
         return $rows
-    } finally {$lock.ReleaseMutex();$lock.Dispose()}
+    } finally {if($commitLock){$commitLock.ReleaseMutex();$commitLock.Dispose()};$lock.ReleaseMutex();$lock.Dispose()}
 }
 
 function Receive-CorpusDependency {
@@ -261,9 +268,14 @@ function Save-CorpusDependencyPlan {
     return $plan
 }
 
+function Get-CorpusModuleInstallRoot {
+    param($Context)
+    return Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'WindowsPowerShell/Modules/ImportExcel'
+}
+
 function Install-CorpusDependencyModule {
     param($Context,$Plan)
-    $base=Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'WindowsPowerShell/Modules/ImportExcel'
+    $base=Get-CorpusModuleInstallRoot $Context
     $destination=Join-Path $base $Plan.Version
     if(Test-Path $destination){throw "ImportExcel $($Plan.Version) already exists at $destination. It was not overwritten."}
     [IO.Directory]::CreateDirectory($base) | Out-Null
@@ -289,7 +301,7 @@ function Install-CorpusDependencyModule {
 
 function Invoke-CorpusDependencyUpdate {
     param($Context,[object[]]$Selection,[ValidateSet('stable','nightly')][string]$Channel='stable')
-    if(-not $Selection.Count){throw 'Select dependencies to update first.'}
+    if($null -eq $Selection -or -not $Selection.Count){throw 'Select dependencies to update first.'}
     $lock=Enter-CorpusDependencyLock
     try {
         if(@(Get-CorpusDependencyRecovery).Count){throw 'Recover the interrupted native update before installing further updates.'}

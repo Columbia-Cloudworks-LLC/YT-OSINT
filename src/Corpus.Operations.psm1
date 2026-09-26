@@ -3,10 +3,11 @@ function Invoke-CorpusOperation {
     param([string]$Root,[string]$Operation,$Arguments=@{},$Shared=$null)
     $ctx=New-CorpusContext $Root $Shared
     # A file handle lock excludes other GUI/CLI writers; crashes release it automatically.
-    $lock=$null; $run=$null; $dependencyLock=$null
+    $lock=$null; $run=$null; $dependencyLock=$null; $dependencyCommitLock=$null
     try {
         if($Operation -in @('SyncAll','SyncChannel','Video','Build')) {
             $dependencyLock=Enter-CorpusDependencyLock
+            $dependencyCommitLock=Enter-CorpusDependencyLock -Commit
             if(@(Get-CorpusDependencyRecovery).Count){throw 'An interrupted dependency update requires recovery in Settings > Dependencies.'}
         }
         if($Operation -notin @('Search','Refresh')) {
@@ -23,7 +24,9 @@ function Invoke-CorpusOperation {
             foreach($name in @('yt-dlp','ffmpeg')) {
                 try {$r=Invoke-CorpusProcess $ctx (Join-Path $env:SystemRoot "$name.exe") @($(if($name -eq 'yt-dlp'){'--version'}else{'-version'})) -Quiet; if($r.ExitCode -eq 0){$value=($r.StdOut -split '\r?\n')[0];if($name -eq 'yt-dlp'){$run.YtDlpVersion=$value}else{$run.FFmpegVersion=$value}}}catch{Write-CorpusLog $ctx Warning Versions $name $_.Exception.Message}
             }
-            $im=Get-Module -ListAvailable ImportExcel | Select-Object -First 1; if($im){$run.ImportExcelVersion=$im.Version.ToString()}
+            $dependencySettings=Get-CorpusDependencySettings $Root
+            $im=if($dependencySettings.ImportExcelPath){Test-ModuleManifest -Path $dependencySettings.ImportExcelPath -ErrorAction Stop}else{Get-Module -ListAvailable ImportExcel | Sort-Object Version -Descending | Select-Object -First 1}
+            if($im){$run.ImportExcelVersion=$im.Version.ToString()}
         }
         switch($Operation) {
             'Subject' { $null=Set-CorpusSubject $Root $Arguments.Name $Arguments.Id }
@@ -73,6 +76,7 @@ function Invoke-CorpusOperation {
     } finally {
         if($run){Write-CorpusJson (Join-Path $Root "data/normalized/runs/$($ctx.RunId).json") $run}
         if($lock){$lock.Dispose()}
+        if($dependencyCommitLock){$dependencyCommitLock.ReleaseMutex();$dependencyCommitLock.Dispose()}
         if($dependencyLock){$dependencyLock.ReleaseMutex();$dependencyLock.Dispose()}
     }
 }

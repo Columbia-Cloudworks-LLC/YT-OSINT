@@ -39,14 +39,14 @@ Describe 'Read-only update checks and caching' {
         $second=@(Get-CorpusDependencyStatus $ctx)
         $first.Count | Should Be 4
         @($second | Where-Object Status -eq 'Update available').Count | Should Be 4
-        Assert-MockCalled Get-CorpusDependencyRelease -ModuleName Corpus.Dependencies -Times 4 -Exactly
+        Assert-MockCalled Get-CorpusDependencyRelease -ModuleName Corpus.Dependencies -Times 4 -Exactly -Scope It
         Test-Path (Join-Path $ctx.Root 'data/dependencies/staging') | Should Be $false
     }
     It 'bypasses the cache on Check now and on channel changes' {
         $null=Get-CorpusDependencyStatus $ctx
         $null=Get-CorpusDependencyStatus $ctx -Force
         $null=Get-CorpusDependencyStatus $ctx -Channel nightly
-        Assert-MockCalled Get-CorpusDependencyRelease -ModuleName Corpus.Dependencies -Times 12 -Exactly
+        Assert-MockCalled Get-CorpusDependencyRelease -ModuleName Corpus.Dependencies -Times 12 -Exactly -Scope It
     }
     It 'expires checks older than 24 hours' {
         $null=Get-CorpusDependencyStatus $ctx
@@ -55,7 +55,7 @@ Describe 'Read-only update checks and caching' {
         foreach($c in $cache){$c.CheckedAt=[datetime]::UtcNow.AddDays(-2).ToString('o')}
         Write-CorpusJson $path $cache
         $null=Get-CorpusDependencyStatus $ctx
-        Assert-MockCalled Get-CorpusDependencyRelease -ModuleName Corpus.Dependencies -Times 8 -Exactly
+        Assert-MockCalled Get-CorpusDependencyRelease -ModuleName Corpus.Dependencies -Times 8 -Exactly -Scope It
     }
     It 'reports an upstream failure as Unknown and does not permit an update' {
         Mock Get-CorpusDependencyRelease -ModuleName Corpus.Dependencies {throw 'Simulated network timeout'}
@@ -130,7 +130,7 @@ Describe 'Transactional native replacement in an isolated directory' {
         (Read-CorpusJson $journal).Status | Should Be Success
         [IO.File]::ReadAllText((Join-Path $target ffmpeg.exe)) | Should Be 'new ffmpeg.exe'
         [IO.File]::ReadAllText((Join-Path $transaction backup/ffprobe.exe)) | Should Be 'old ffprobe.exe'
-        Assert-MockCalled Test-CorpusDependencyCandidate -ModuleName Corpus.DependencyTransaction -Times 2 -Exactly
+        Assert-MockCalled Test-CorpusDependencyCandidate -ModuleName Corpus.DependencyTransaction -Times 2 -Exactly -Scope It
     }
     It 'restores both originals if verification fails after replacement' {
         Mock Test-CorpusDependencyCandidate -ModuleName Corpus.DependencyTransaction {
@@ -174,5 +174,68 @@ Describe 'ImportExcel candidate verification' {
         $ctx=New-DependencyTestContext
         $module=Get-Module -ListAvailable ImportExcel | Sort-Object Version -Descending | Select-Object -First 1
         {Test-CorpusDependencyCandidate $ctx ImportExcel $module.ModuleBase $module.Version.ToString()} | Should Not Throw
+    }
+}
+Describe 'Windows upstream response compatibility' {
+    It 'decodes byte-array HTTP metadata as UTF-8 text' {
+        Mock Invoke-WebRequest -ModuleName Corpus.Dependencies { [pscustomobject]@{Content=[Text.Encoding]::UTF8.GetBytes('9.0.2')} }
+        (Get-CorpusDependencyText 'https://www.gyan.dev/ffmpeg/builds/release-version') | Should Be '9.0.2'
+    }
+    It 'recognizes native FFmpeg Git snapshot version strings' {
+        $ctx=New-DependencyTestContext;$path=Join-Path $ctx.Root ffmpeg.exe
+        [IO.File]::WriteAllText($path,'fixture')
+        Mock Invoke-CorpusProcess -ModuleName Corpus.Dependencies { [pscustomobject]@{ExitCode=0;StdOut="ffmpeg version 2025-01-22-git-abc-full_build`r`n";StdErr=''} }
+        (Get-CorpusNativeVersion $ctx $path ffmpeg) | Should Match '2025-01-22-git'
+    }
+}
+Describe 'Side-by-side ImportExcel promotion' {
+    BeforeEach {
+        $ctx=New-DependencyTestContext
+        $base=Join-Path $ctx.Root user-modules
+        $old=Join-Path $base '1.0.0';New-Item $old -ItemType Directory -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $old ImportExcel.psd1),'previous')
+        Write-CorpusJson (Join-Path $ctx.Root 'data/dependencies/settings.json') @{YtDlpChannel='stable';ImportExcelPath=(Join-Path $old ImportExcel.psd1)}
+        $candidate=Join-Path $ctx.Root candidate;New-Item $candidate -ItemType Directory | Out-Null
+        [IO.File]::WriteAllText((Join-Path $candidate ImportExcel.psd1),'new')
+        $stage=Join-Path $ctx.Root stage;New-Item $stage -ItemType Directory | Out-Null
+        $plan=[pscustomobject]@{Version='2.0.0';Candidate=$candidate;Stage=$stage}
+        Mock Get-CorpusModuleInstallRoot -ModuleName Corpus.Dependencies {param($Context) Join-Path $Context.Root user-modules}
+        Mock Test-CorpusDependencyCandidate -ModuleName Corpus.Dependencies {}
+    }
+    It 'selects the verified module without removing the previous version' {
+        Install-CorpusDependencyModule $ctx $plan
+        Test-Path (Join-Path $base '1.0.0/ImportExcel.psd1') | Should Be $true
+        Test-Path (Join-Path $base '2.0.0/ImportExcel.psd1') | Should Be $true
+        (Get-CorpusDependencySettings $ctx.Root).ImportExcelPath | Should Be (Join-Path $base '2.0.0/ImportExcel.psd1')
+        (Read-CorpusJson (Join-Path $stage module-backup.json)).PreviousModulePath | Should Be (Join-Path $old ImportExcel.psd1)
+    }
+    It 'restores the previous selection if post-install verification fails' {
+        Mock Test-CorpusDependencyCandidate -ModuleName Corpus.Dependencies {
+            param($Context,$Name,$Directory)
+            if((Split-Path $Directory -Leaf) -eq '2.0.0'){throw 'Simulated workbook failure'}
+        }
+        {Install-CorpusDependencyModule $ctx $plan} | Should Throw
+        Test-Path (Join-Path $base '2.0.0') | Should Be $false
+        (Get-CorpusDependencySettings $ctx.Root).ImportExcelPath | Should Be (Join-Path $old ImportExcel.psd1)
+    }
+    It 'does not overwrite an already installed version directory' {
+        $existing=Join-Path $base '2.0.0';New-Item $existing -ItemType Directory | Out-Null
+        [IO.File]::WriteAllText((Join-Path $existing ImportExcel.psd1),'existing')
+        {Install-CorpusDependencyModule $ctx $plan} | Should Throw
+        [IO.File]::ReadAllText((Join-Path $existing ImportExcel.psd1)) | Should Be 'existing'
+    }
+}
+Describe 'Cross-process maintenance exclusion' {
+    It 'blocks a runtime reader while the native helper owns its commit lock' {
+        $owner=Enter-CorpusDependencyLock -Commit
+        $worker=[powershell]::Create()
+        try {
+            $null=$worker.AddScript({param($modulePath)
+                Import-Module $modulePath -Force
+                try{$lock=Enter-CorpusDependencyLock -Commit;$lock.ReleaseMutex();$lock.Dispose();return 'Unexpectedly acquired'}
+                catch{return 'Blocked'}
+            }).AddArgument((Join-Path $project 'src/Corpus.Dependencies.psm1'))
+            @($worker.Invoke())[0] | Should Be Blocked
+        } finally {$worker.Dispose();$owner.ReleaseMutex();$owner.Dispose()}
     }
 }

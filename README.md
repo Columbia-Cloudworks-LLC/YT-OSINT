@@ -40,6 +40,8 @@ Authoritative references: [yt-dlp](https://github.com/yt-dlp/yt-dlp), [FFmpeg Wi
 
 ## Safe dependency updates
 
+![Dependency management page](docs/dependencies.png)
+
 Settings → Dependencies manages **yt-dlp**, the **FFmpeg/ffprobe pair**, **Deno**, and **ImportExcel**. Deno is the optional managed JavaScript runtime for current yt-dlp YouTube support; a missing runtime is shown as Missing and installed only when selected. Its managed location is `$env:SystemRoot\deno.exe`; unrelated runtimes elsewhere on PATH are not changed.
 
 Startup performs background release checks at most once every 24 hours. Check now bypasses the cache. Checks fetch small upstream metadata and run local version probes; they do not download packages, request UAC, or modify installed dependencies. Network failures show **Unknown**, with the error and last-check time, and are cached for the same interval to avoid retry storms. Installed versions are re-read even when release metadata is cached. GitHub requests are unauthenticated and can be rate limited.
@@ -162,6 +164,12 @@ Separate network integration:
 ```
 
 This checks dependencies and syncs both configured channels twice into a new isolated temporary corpus, prints its directory, creates a workbook, and writes `integration-results.json`. Exit 2 reports live extraction failures; it is not a successful transcript acceptance result. A larger limit or `-Limit 0` can take a long time and encounter rate limits. It never downloads full video media.
+
+A separate updater integration test downloads real releases, verifies checksums and versions, replaces native binaries **only inside a temporary test directory**, and checks the ImportExcel workbook round-trip without installing it:
+
+```powershell
+.\tests\Invoke-DependencyIntegration.ps1
+```
 
 A timed WPF startup test is also available:
 

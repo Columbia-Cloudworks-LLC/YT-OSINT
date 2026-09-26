@@ -21,6 +21,8 @@ function Restore-CorpusNativeTransaction {
                 if((Get-CorpusFileDigest $backup) -ne $entry.BeforeHash){throw 'Backup checksum failed; manual recovery is required.'}
                 $restore=Join-Path $TransactionRoot ('restore-'+$entry.Name)
                 [IO.File]::Copy($backup,$restore,$true)
+                $aclText=Get-CorpusProperty $entry BeforeAcl ''
+                if($aclText){$acl=[Security.AccessControl.FileSecurity]::new();$acl.SetSecurityDescriptorSddlForm($aclText,[Security.AccessControl.AccessControlSections]::Access);[IO.File]::SetAccessControl($restore,$acl)}
                 if(Test-Path $target){[IO.File]::Replace($restore,$target,[NullString]::Value)}else{[IO.File]::Move($restore,$target)}
             } elseif(Test-Path $target){[IO.File]::Delete($target)}
         }
@@ -49,7 +51,8 @@ function Install-CorpusNativeTransaction {
         $observed=@($Baseline | Where-Object Name -eq $file)
         if($observed.Count -ne 1 -or $observed[0].Hash -ne $before){throw "$file changed since this update was staged. Check again before updating."}
         if($exists){[IO.File]::Copy($target,(Join-Path $backupDir $file),$false)}
-        $entries+=[pscustomobject]@{Name=$file;Existed=$exists;BeforeHash=$before;AfterHash=(Get-CorpusFileDigest (Join-Path $Candidate $file))}
+        $beforeAcl=if($exists){[IO.File]::GetAccessControl($target).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access)}else{''}
+        $entries+=[pscustomobject]@{Name=$file;Existed=$exists;BeforeAcl=$beforeAcl;BeforeHash=$before;AfterHash=(Get-CorpusFileDigest (Join-Path $Candidate $file))}
     }
     $journal=[pscustomobject]@{Name=$Name;Version=$Version;Status='Committing';Message='Replacing verified binaries.';StartedAt=[datetime]::UtcNow.ToString('o');Entries=$entries;BackupDirectory=$backupDir}
     # Journal all members before replacing any. Recovery handles both untouched and replaced members.

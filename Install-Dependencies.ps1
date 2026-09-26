@@ -4,7 +4,7 @@ $ErrorActionPreference='Stop'
 if(-not $Root){ $Root=Split-Path -Parent $MyInvocation.MyCommand.Path }
 Set-StrictMode -Version 2
 foreach($moduleName in @('Logging','Core','Process','Dependencies')){Import-Module (Join-Path $PSScriptRoot "src/Corpus.$moduleName.psm1") -Force -Global}
-$dependencyLock=$null
+$dependencyLock=$null; $dependencyCommitLock=$null
 [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
 $logDir=Join-Path $Root 'logs'; [IO.Directory]::CreateDirectory($logDir) | Out-Null
 $log=Join-Path $logDir 'dependencies.jsonl'
@@ -40,7 +40,7 @@ function Get-DependencyVersion([string]$Path,[string]$Argument) {
 }
 try {
     # An elevated missing-dependency child is covered by its waiting parent.
-    if(-not $NativeOnly){$dependencyLock=Enter-CorpusDependencyLock}
+    if(-not $NativeOnly){$dependencyLock=Enter-CorpusDependencyLock;$dependencyCommitLock=Enter-CorpusDependencyLock -Commit}
     if(@(Get-CorpusDependencyRecovery).Count){throw 'An interrupted dependency update requires recovery in Settings > Dependencies.'}
     if(-not $env:SystemRoot -or -not (Test-Path -LiteralPath $env:SystemRoot -PathType Container)){throw 'Windows SystemRoot could not be determined.'}
     $names=@('yt-dlp.exe','ffmpeg.exe','ffprobe.exe')
@@ -119,5 +119,6 @@ try {
     if($NativeOnly){ Write-Error $_ -ErrorAction Continue; exit 1 }
     throw
 } finally {
+    if($dependencyCommitLock){$dependencyCommitLock.ReleaseMutex();$dependencyCommitLock.Dispose()}
     if($dependencyLock){$dependencyLock.ReleaseMutex();$dependencyLock.Dispose()}
 }

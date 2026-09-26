@@ -2,6 +2,27 @@
 
 Validated on 2026-09-26. This report distinguishes deterministic application checks from network-dependent acceptance.
 
+## Dependency updater follow-up
+
+The explicit dependency manager was added and tested after the original corpus validation below. The current local suite passes **54 tests**, with no skipped or pending cases. New tests cover daily-cache reuse/expiration/channel invalidation, Unknown network results, Git-build version handling, SHA256/SHA512 rejection, ZIP traversal prevention, changed-release rejection, pair rollback after verification or file-lock failures, interrupted recovery, external-change protection, module promotion/rollback, and maintenance-lock exclusion.
+
+The WPF Settings → Dependencies page loaded all four dependency results through its background worker, remained on the dispatcher loop, and closed with the worker idle. Its actual rendering is recorded in `dependencies.png`.
+
+The opt-in `tests/Invoke-DependencyIntegration.ps1` passed using real upstream packages:
+
+| Dependency | Release tested | Verification |
+|---|---|---|
+| yt-dlp | 2026.08.19 | GitHub SHA256, executable version, real replacement in a temporary directory |
+| FFmpeg / ffprobe | 9.0.2 essentials | Gyan SHA256, both executable versions, real pair replacement in a temporary directory |
+| Deno | 2.9.7 | GitHub SHA256, executable version, real installation in a temporary directory |
+| ImportExcel | 7.8.10 | Gallery SHA512, extraction, fresh-process import and XLSX round-trip |
+
+These tests deliberately did **not** replace SystemRoot executables or install a module into the user's live module directory. UAC approval/decline and protected SystemRoot installation remain a manual acceptance check; the underlying replacement/rollback functions were exercised with real Windows files and executables in isolated directories. Startup still preserves installed versions. Explicit updates now replace them only after user selection and verification.
+
+The live read-only check correctly identified the existing yt-dlp as outdated, the installed FFmpeg as a different Git/full build, Deno as missing, and ImportExcel as current. Original live YouTube extraction results below remain historical; successful full-channel ingestion was not retested as part of this updater change.
+
+## Original corpus validation
+
 ## Environment
 
 | Component | Tested version |

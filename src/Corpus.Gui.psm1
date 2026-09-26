@@ -1,6 +1,6 @@
 ﻿Set-StrictMode -Version 2
 function Show-CorpusWindow {
-    param([string]$Root,[switch]$SkipDependencies,[switch]$SmokeTest,[string]$ScreenshotPath='')
+    param([string]$Root,[switch]$SkipDependencies,[switch]$SmokeTest,[string]$ScreenshotPath='',[switch]$SmokeCheckDependencies)
     $appRoot=Split-Path $PSScriptRoot -Parent
     Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase
     [xml]$xaml=Get-Content (Join-Path $PSScriptRoot 'Corpus.Gui.xaml') -Raw -Encoding UTF8
@@ -12,7 +12,7 @@ function Show-CorpusWindow {
         $name=$node.GetAttribute('Name','http://schemas.microsoft.com/winfx/2006/xaml')
         $ui[$name]=$window.FindName($name)
     }
-    $state=@{Worker=$null;Handle=$null;Shared=$null;Operation='';Snapshot=$null;Ready=[bool]$SkipDependencies;Closing=$false;PendingSubject='';SmokeTicks=0;LastOutcome='Ready';CheckedStartup=([bool]$SkipDependencies -or [bool]$SmokeTest);RestartRequired=$false;DependencyRows=@()}
+    $state=@{Worker=$null;Handle=$null;Shared=$null;Operation='';Snapshot=$null;Ready=[bool]$SkipDependencies;Closing=$false;PendingSubject='';SmokeTicks=0;LastOutcome='Ready';CheckedStartup=(([bool]$SkipDependencies -or [bool]$SmokeTest) -and -not $SmokeCheckDependencies);RestartRequired=$false;DependencyRows=@()}
     $mutators=@('CreateSubject','RenameSubject','AddChannel','RemoveChannel','SyncSelected','SyncAll','Refresh','CreateVideoSubject','ImportVideo','Build','Search','FilterCorpus')
     $ui.Paths.Text="Application and corpus root: $Root`nWorkbook: $(Join-Path $Root 'output/YouTubeCorpus.xlsx')`nSource configuration: $(Join-Path $Root 'config.json')`nNative dependencies: $env:SystemRoot"
     $dependencySettings=Get-CorpusDependencySettings $Root
@@ -86,11 +86,13 @@ function Show-CorpusWindow {
         $ui.DependencyNotice.Text='Channel changed. Press Check now to review available releases.'
     })
     $ui.UpdateDependencies.Add_Click({
-        $ui.DependenciesGrid.CommitEdit()
+        $null=$ui.DependenciesGrid.CommitEdit()
         $selection=@($state.DependencyRows | Where-Object {$_.Selected -and $_.CanUpdate})
         if(-not $selection.Count){Show-UiError 'Select at least one available update.';return}
         $review=($selection | ForEach-Object {"$($_.Name): $($_.InstalledVersion) -> $($_.AvailableVersion) [$($_.Provider)]"}) -join "`r`n"
-        $review+="`r`n`r`nNative updates replace the displayed SystemRoot binaries. FFmpeg/ffprobe switch to the gyan.dev essentials release pair. Backups are retained and failed verification triggers rollback. Restart YT-OSINT afterward. Continue?"
+        if(@($selection | Where-Object Name -ne 'ImportExcel').Count){$review+="`r`n`r`nNative updates replace the displayed SystemRoot binaries after UAC approval."}
+        if(@($selection | Where-Object Name -eq 'FFmpeg').Count){$review+="`r`nFFmpeg/ffprobe will use the gyan.dev essentials release pair. This may remove codecs from an existing full build used by other applications."}
+        $review+="`r`n`r`nPrevious versions are retained. Failed verification triggers rollback. Restart YT-OSINT afterward. Continue?"
         if([Windows.MessageBox]::Show($window,$review,'Review dependency updates','YesNo','Question') -eq 'Yes'){
             Start-Work 'UpdateDependencies' @{Selection=$selection;Channel=(Get-DependencyChannel)}
         }
@@ -161,13 +163,14 @@ function Show-CorpusWindow {
         }
     })
     $window.Add_Closing({param($sender,$e) if($state.Worker){$e.Cancel=$true;$state.Closing=$true;if($state.Operation -ne 'Bootstrap'){$state.Shared.Cancel=$true};$ui.Status.Text='Finishing safely before closing…'}})
-    $window.Add_ContentRendered({if($SkipDependencies){Start-Work 'Refresh'}else{Start-Work 'Bootstrap'};$timer.Start()})
+    $window.Add_ContentRendered({if($SmokeCheckDependencies){$ui.Tabs.SelectedIndex=6};if($SkipDependencies){Start-Work 'Refresh'}else{Start-Work 'Bootstrap'};$timer.Start()})
     Set-Busy $true
     try{
         $null=$window.ShowDialog()
         if($SmokeTest){
             if(-not $state.Ready -or -not $state.Snapshot){throw 'GUI smoke test failed: background initialization did not complete.'}
-            [pscustomobject]@{Ready=$state.Ready;Subjects=$state.Snapshot.Config.subjects.Count;DispatcherTicks=$state.SmokeTicks;WorkerIdle=($null -eq $state.Worker)}
+            if($SmokeCheckDependencies -and $state.DependencyRows.Count -ne 4){throw 'Dependency page did not receive all four background check results.'}
+            [pscustomobject]@{Ready=$state.Ready;Subjects=$state.Snapshot.Config.subjects.Count;DispatcherTicks=$state.SmokeTicks;WorkerIdle=($null -eq $state.Worker);Dependencies=$state.DependencyRows.Count}
         }
     }finally{$timer.Stop();if($state.Worker){$state.Shared.Cancel=$true;$state.Worker.Dispose()}}
 }
