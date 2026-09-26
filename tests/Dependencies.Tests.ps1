@@ -239,3 +239,14 @@ Describe 'Cross-process maintenance exclusion' {
         } finally {$worker.Dispose();$owner.ReleaseMutex();$owner.Dispose()}
     }
 }
+
+Describe 'Maintenance failure reporting' {
+    It 'records a rejected update in the structured run log' {
+        $ctx=New-DependencyTestContext
+        Mock Save-CorpusDependencyPlan -ModuleName Corpus.Dependencies {throw 'Fixture checksum mismatch'}
+        {Invoke-CorpusDependencyUpdate $ctx @([pscustomobject]@{Name='Deno';AvailableVersion='2.9.7'})} | Should Throw
+        $events=@(Get-Content $ctx.LogPath | ForEach-Object {$_ | ConvertFrom-Json})
+        $events[-1].Severity | Should Be Error
+        $events[-1].Message | Should Match 'checksum mismatch'
+    }
+}

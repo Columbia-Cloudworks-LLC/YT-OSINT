@@ -4,7 +4,7 @@ Validated on 2026-09-26. This report distinguishes deterministic application che
 
 ## Dependency updater follow-up
 
-The explicit dependency manager was added and tested after the original corpus validation below. The current local suite passes **54 tests**, with no skipped or pending cases. New tests cover daily-cache reuse/expiration/channel invalidation, Unknown network results, Git-build version handling, SHA256/SHA512 rejection, ZIP traversal prevention, changed-release rejection, pair rollback after verification or file-lock failures, interrupted recovery, external-change protection, module promotion/rollback, and maintenance-lock exclusion.
+The explicit dependency manager was added and tested after the original corpus validation below. The current local suite passes **55 tests**, with no skipped or pending cases. New tests cover daily-cache reuse/expiration/channel invalidation, Unknown network results, Git-build version handling, SHA256/SHA512 rejection, ZIP traversal prevention, changed-release rejection, pair rollback after verification or file-lock failures, interrupted recovery, external-change protection, module promotion/rollback, and maintenance-lock exclusion.
 
 The WPF Settings → Dependencies page loaded all four dependency results through its background worker, remained on the dispatcher loop, and closed with the worker idle. Its actual rendering is recorded in `dependencies.png`.
 

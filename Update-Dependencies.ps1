@@ -93,6 +93,7 @@ if($NativeCommit -or $RecoverNative){
     }
 }
 $ctx=New-CorpusContext ([IO.Path]::GetFullPath($Root))
+if(-not $PSBoundParameters.ContainsKey('Channel')){$Channel=(Get-CorpusDependencySettings $ctx.Root).YtDlpChannel}
 switch($Action){
     'Check' {Get-CorpusDependencyStatus $ctx $Channel -Force:$Force}
     'Update' {

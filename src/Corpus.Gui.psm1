@@ -28,7 +28,7 @@ function Show-CorpusWindow {
         foreach($row in $state.DependencyRows){$row | Add-Member NoteProperty Selected $false -Force}
         $ui.DependenciesGrid.ItemsSource=$state.DependencyRows
         $available=@($Rows | Where-Object CanUpdate).Count
-        $ui.DependencyNotice.Text="$available dependencies have install/update options. Select the checkboxes and review the changes before installation."
+        $ui.DependencyNotice.Text=if($state.RestartRequired){"Maintenance finished. Restart YT-OSINT before resuming imports or workbook builds. $available install/update options remain."}else{"$available dependencies have install/update options. Select the checkboxes and review the changes before installation."}
     }
     function Start-Work([string]$Operation,$Arguments=@{}) {
         if($state.Worker){return}
@@ -145,7 +145,7 @@ function Show-CorpusWindow {
             try{$result=@($state.Worker.EndInvoke($state.Handle));if($state.Worker.HadErrors){throw $state.Worker.Streams.Error[0].Exception.Message}
                 switch($op){
                     'Bootstrap' {$state.Ready=$true;$ui.Status.Text='Ready'}
-                    'CheckDependencies' {Set-DependencyRows $result;$ui.Status.Text='Dependency check complete'}
+                    'CheckDependencies' {Set-DependencyRows $result;$ui.Status.Text=if($state.RestartRequired){'Restart YT-OSINT before resuming work.'}else{'Dependency check complete'}}
                     'UpdateDependencies' {$ui.Status.Text='Updates installed. Restart YT-OSINT before resuming work.'}
                     'RecoverDependencies' {$ui.Status.Text='Recovery completed. Restart YT-OSINT.'}
                     'Refresh' {if($result.Count){Set-Snapshot $result[-1]}}

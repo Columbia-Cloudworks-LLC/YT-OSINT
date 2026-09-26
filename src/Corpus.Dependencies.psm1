@@ -340,6 +340,9 @@ function Invoke-CorpusDependencyUpdate {
             $results+=[pscustomobject]@{Name=$plan.Name;Version=$plan.Version;Status='Updated';RestartRequired=$true}
         }
         return $results
+    } catch {
+        Write-CorpusLog $Context Error Dependencies (($Selection | ForEach-Object Name) -join ', ') $_.Exception.Message $_.ScriptStackTrace
+        throw
     } finally {
         # Invalidate cached release checks after success or failure, without touching sources or corpus data.
         $cache=Join-Path $Context.Root 'data/dependencies/checks.json'
