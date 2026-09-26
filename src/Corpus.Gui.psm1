@@ -1,6 +1,17 @@
 ﻿Set-StrictMode -Version 2
+function Start-CorpusRestart {
+    param([string]$Root,[switch]$SmokeTest)
+    $signal=Join-Path $Root ('logs/restart-'+[guid]::NewGuid().ToString('N')+'.ready')
+    $arguments=@('-NoProfile','-STA','-ExecutionPolicy','Bypass','-File',(Join-Path (Split-Path $PSScriptRoot -Parent) 'YouTubeCorpus.ps1'),'-Root',$Root,'-OpenDependencies','-RestartSignal',$signal)
+    if($SmokeTest){$arguments+=@('-SmokeTest','-SkipDependencies')}
+    $quoted=($arguments | ForEach-Object {[YouTubeCorpus.ProcessRunner]::Quote($_)}) -join ' '
+    $process=Start-Process -FilePath (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe') -ArgumentList $quoted -WindowStyle Hidden -PassThru -RedirectStandardOutput ($signal+'.out.log') -RedirectStandardError ($signal+'.error.log') -ErrorAction Stop
+    $null=$process.Handle
+    if($process.WaitForExit(300)){$process.Dispose();throw 'Could not restart YT-OSINT. Close and reopen the application.'}
+    return [pscustomobject]@{Process=$process;SignalPath=$signal}
+}
 function Show-CorpusWindow {
-    param([string]$Root,[switch]$SkipDependencies,[switch]$SmokeTest,[string]$ScreenshotPath='',[switch]$SmokeCheckDependencies)
+    param([string]$Root,[switch]$SkipDependencies,[switch]$SmokeTest,[string]$ScreenshotPath='',[switch]$SmokeCheckDependencies,[switch]$OpenDependencies)
     $appRoot=Split-Path $PSScriptRoot -Parent
     Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase
     [xml]$xaml=Get-Content (Join-Path $PSScriptRoot 'Corpus.Gui.xaml') -Raw -Encoding UTF8
@@ -12,14 +23,15 @@ function Show-CorpusWindow {
         $name=$node.GetAttribute('Name','http://schemas.microsoft.com/winfx/2006/xaml')
         $ui[$name]=$window.FindName($name)
     }
-    $state=@{Worker=$null;Handle=$null;Shared=$null;Operation='';Snapshot=$null;Ready=[bool]$SkipDependencies;Closing=$false;PendingSubject='';SmokeTicks=0;LastOutcome='Ready';CheckedStartup=(([bool]$SkipDependencies -or [bool]$SmokeTest) -and -not $SmokeCheckDependencies);RestartRequired=$false;DependencyRows=@()}
+    $state=@{Worker=$null;Handle=$null;Shared=$null;Operation='';Snapshot=$null;Ready=[bool]$SkipDependencies;Closing=$false;PendingSubject='';SmokeTicks=0;LastOutcome='Ready';CheckedStartup=(([bool]$SkipDependencies -or [bool]$SmokeTest) -and -not $SmokeCheckDependencies);RestartRequired=$false;RestartTicket=$null;DependencyRows=@()}
     $mutators=@('CreateSubject','RenameSubject','AddChannel','RemoveChannel','SyncSelected','SyncAll','Refresh','CreateVideoSubject','ImportVideo','Build','Search','FilterCorpus')
-    $ui.Paths.Text="Application and corpus root: $Root`nWorkbook: $(Join-Path $Root 'output/YouTubeCorpus.xlsx')`nSource configuration: $(Join-Path $Root 'config.json')`nNative dependencies: $env:SystemRoot"
+    $ui.Paths.Text="Application and corpus root: $Root`nWorkbook: $(Join-Path $Root 'output/YouTubeCorpus.xlsx')`nSource configuration: $(Join-Path $Root 'config.json')`nNative dependencies: $(Get-CorpusNativeRoot)"
     $dependencySettings=Get-CorpusDependencySettings $Root
     $ui.DependencyChannel.SelectedIndex=if($dependencySettings.YtDlpChannel -eq 'nightly'){1}else{0}
     function Set-Busy([bool]$Busy) {
         foreach($name in $mutators){$ui[$name].IsEnabled=(-not $Busy -and $state.Ready -and -not $state.RestartRequired)}
         foreach($name in @('CheckDependencies','UpdateDependencies','RecoverDependencies','DependencyChannel','DependenciesGrid')){$ui[$name].IsEnabled=(-not $Busy)}
+        $ui.RestartApplication.IsEnabled=(-not $Busy);$ui.RestartApplication.Visibility=if($state.RestartRequired){'Visible'}else{'Collapsed'}
         $ui.Cancel.IsEnabled=$Busy -and $state.Operation -notin @('Bootstrap','RecoverDependencies')
     }
     function Get-DependencyChannel {return [string]$ui.DependencyChannel.SelectedItem.Content}
@@ -32,11 +44,11 @@ function Show-CorpusWindow {
     }
     function Start-Work([string]$Operation,$Arguments=@{}) {
         if($state.Worker){return}
-        $state.Operation=$Operation;$state.Shared=[hashtable]::Synchronized(@{Cancel=$false;Progress=$null;Messages=[Collections.Concurrent.ConcurrentQueue[string]]::new()})
+        $state.Operation=$Operation;$state.Shared=[hashtable]::Synchronized(@{Cancel=$false;CommitInProgress=$false;DependenciesChanged=$false;Progress=$null;Messages=[Collections.Concurrent.ConcurrentQueue[string]]::new()})
         $ps=[powershell]::Create()
         $null=$ps.AddScript({param($root,$op,$argsMap,$shared,$codeRoot)
             $ErrorActionPreference='Stop'
-            foreach($name in @('Logging','Core','Process','Dependencies','Transcript','YouTube','Excel','Operations')){Import-Module (Join-Path $codeRoot "src/Corpus.$name.psm1") -Force -Global}
+            foreach($name in @('Logging','Core','Process','Dependencies','DependencyTransaction','Transcript','YouTube','Excel','Operations')){Import-Module (Join-Path $codeRoot "src/Corpus.$name.psm1") -Force -Global}
             if($op -eq 'Bootstrap') {
                 & (Join-Path $codeRoot 'Install-Dependencies.ps1') -Root $root -ProgressPath (Join-Path $root 'logs/bootstrap-progress.txt')
                 return 'Dependencies ready'
@@ -89,14 +101,17 @@ function Show-CorpusWindow {
         $null=$ui.DependenciesGrid.CommitEdit()
         $selection=@($state.DependencyRows | Where-Object {$_.Selected -and $_.CanUpdate})
         if(-not $selection.Count){Show-UiError 'Select at least one available update.';return}
-        $review=($selection | ForEach-Object {"$($_.Name): $($_.InstalledVersion) -> $($_.AvailableVersion) [$($_.Provider)]"}) -join "`r`n"
-        if(@($selection | Where-Object Name -ne 'ImportExcel').Count){$review+="`r`n`r`nNative updates replace the displayed SystemRoot binaries after UAC approval."}
-        if(@($selection | Where-Object Name -eq 'FFmpeg').Count){$review+="`r`nFFmpeg/ffprobe will use the gyan.dev essentials release pair. This may remove codecs from an existing full build used by other applications."}
-        $review+="`r`n`r`nPrevious versions are retained. Failed verification triggers rollback. Restart YT-OSINT afterward. Continue?"
-        if([Windows.MessageBox]::Show($window,$review,'Review dependency updates','YesNo','Question') -eq 'Yes'){
+        $label=if($selection.Count -eq 1){'dependency'}else{'dependencies'}
+        $review="Update $($selection.Count) ${label}?`r`n`r`nYT-OSINT will restart when the updates are complete."
+        if([Windows.MessageBox]::Show($window,$review,'Update dependencies','YesNo','Question') -eq 'Yes'){
             Start-Work 'UpdateDependencies' @{Selection=$selection;Channel=(Get-DependencyChannel)}
         }
     })
+    function Restart-Application {
+        try {$state.RestartTicket=Start-CorpusRestart $Root;$window.Close()}
+        catch {Show-UiError $_.Exception.Message}
+    }
+    $ui.RestartApplication.Add_Click({Restart-Application})
     $ui.RecoverDependencies.Add_Click({Start-Work 'RecoverDependencies'})
     $ui.SubjectPick.Add_SelectionChanged({Show-SubjectChannels})
     $ui.CreateSubject.Add_Click({Start-Work 'Subject' @{Name=$ui.SubjectName.Text;Id=''}})
@@ -146,24 +161,24 @@ function Show-CorpusWindow {
                 switch($op){
                     'Bootstrap' {$state.Ready=$true;$ui.Status.Text='Ready'}
                     'CheckDependencies' {Set-DependencyRows $result;$ui.Status.Text=if($state.RestartRequired){'Restart YT-OSINT before resuming work.'}else{'Dependency check complete'}}
-                    'UpdateDependencies' {$ui.Status.Text='Updates installed. Restart YT-OSINT before resuming work.'}
-                    'RecoverDependencies' {$ui.Status.Text='Recovery completed. Restart YT-OSINT.'}
+                    'UpdateDependencies' {$ui.Status.Text='Updates complete. Restarting YT-OSINT…'}
+                    'RecoverDependencies' {$ui.Status.Text='Recovery complete. Restarting YT-OSINT…'}
                     'Refresh' {if($result.Count){Set-Snapshot $result[-1]}}
                     'Search' {$ui.SearchGrid.ItemsSource=@($result | Select-Object SubjectName,ChannelName,VideoTitle,PublishedDate,TranscriptText,TimestampDisplay,Context,TimestampUrl);$ui.Status.Text="$($result.Count) matches"}
                     'Filter' {$ui.CorpusGrid.ItemsSource=$result}
                     default {if($result.Count -and $result[-1].PSObject.Properties['FinalState']){$ui.Status.Text="$($result[-1].FinalState): $($result[-1].VideosDiscovered) discovered; $($result[-1].TranscriptsAdded) transcripts added; $($result[-1].TranscriptsUnavailable) unavailable; $($result[-1].Failures) failures"}}
                 }
-            }catch{$failed=$true;$ui.Status.Text=if($state.Shared.Cancel){'Cancelled; completed work preserved.'}else{'Operation failed; see Logs / Status.'};$ui.LogText.AppendText($_.Exception.GetBaseException().Message+"`r`n")}
-            finally{if($op -in @('UpdateDependencies','RecoverDependencies')){$state.RestartRequired=$true;$ui.DependencyNotice.Text='Maintenance finished. Restart YT-OSINT before running imports or workbook builds.'};if($op -ne 'Refresh'){$state.LastOutcome=$ui.Status.Text};$state.Worker.Dispose();$state.Worker=$null;$state.Handle=$null;$ui.Progress.IsIndeterminate=$false;$ui.Progress.Value=0;Set-Busy $false}
+            }catch{$failed=$true;$state.WorkerError=$_.Exception.GetBaseException().Message;$ui.Status.Text=if($state.Shared.Cancel){'Cancelled; completed work preserved.'}else{'Operation failed; see Logs / Status.'};$ui.LogText.AppendText($_.Exception.GetBaseException().Message+"`r`n")}
+            finally{if($op -in @('UpdateDependencies','RecoverDependencies')){$state.RestartRequired=(-not $failed -or [bool]$state.Shared.DependenciesChanged);$ui.DependencyNotice.Text=if($failed){'Update did not complete. See Logs / Status for details.'}else{'Updates complete. Restarting YT-OSINT…'}};if($op -ne 'Refresh'){$state.LastOutcome=$ui.Status.Text};$state.Worker.Dispose();$state.Worker=$null;$state.Handle=$null;$ui.Progress.IsIndeterminate=$false;$ui.Progress.Value=0;Set-Busy $false}
             if($state.Closing){$window.Close();return}
             if($op -eq 'Bootstrap' -and $failed){$ui.LogText.AppendText("Use Settings > Dependencies to check or recover dependencies, then restart.`r`n");Start-Work 'CheckDependencies' @{Channel=(Get-DependencyChannel);Force=$false}}
-            elseif($op -in @('UpdateDependencies','RecoverDependencies')){Start-Work 'CheckDependencies' @{Channel=(Get-DependencyChannel);Force=$true}}
+            elseif($op -in @('UpdateDependencies','RecoverDependencies')){if(-not $failed){Restart-Application}else{Show-UiError $state.WorkerError}}
             elseif($op -notin @('Refresh','Search','Filter','CheckDependencies')){Start-Work 'Refresh'}
             elseif($op -eq 'Refresh'){$ui.Status.Text=$state.LastOutcome;if(-not $state.CheckedStartup){$state.CheckedStartup=$true;Start-Work 'CheckDependencies' @{Channel=(Get-DependencyChannel);Force=$false}}}
         }
     })
     $window.Add_Closing({param($sender,$e) if($state.Worker){$e.Cancel=$true;$state.Closing=$true;if($state.Operation -ne 'Bootstrap'){$state.Shared.Cancel=$true};$ui.Status.Text='Finishing safely before closing…'}})
-    $window.Add_ContentRendered({if($SmokeCheckDependencies){$ui.Tabs.SelectedIndex=6};if($SkipDependencies){Start-Work 'Refresh'}else{Start-Work 'Bootstrap'};$timer.Start()})
+    $window.Add_ContentRendered({if($SmokeCheckDependencies -or $OpenDependencies){$ui.Tabs.SelectedIndex=6};if($SkipDependencies){Start-Work 'Refresh'}else{Start-Work 'Bootstrap'};$timer.Start()})
     Set-Busy $true
     try{
         $null=$window.ShowDialog()
@@ -172,6 +187,6 @@ function Show-CorpusWindow {
             if($SmokeCheckDependencies -and $state.DependencyRows.Count -ne 4){throw 'Dependency page did not receive all four background check results.'}
             [pscustomobject]@{Ready=$state.Ready;Subjects=$state.Snapshot.Config.subjects.Count;DispatcherTicks=$state.SmokeTicks;WorkerIdle=($null -eq $state.Worker);Dependencies=$state.DependencyRows.Count}
         }
-    }finally{$timer.Stop();if($state.Worker){$state.Shared.Cancel=$true;$state.Worker.Dispose()}}
+    }finally{$timer.Stop();if($state.Worker){$state.Shared.Cancel=$true;$state.Worker.Dispose()};if($state.RestartTicket){[IO.File]::WriteAllText($state.RestartTicket.SignalPath,'ready');$state.RestartTicket.Process.Dispose()}}
 }
-Export-ModuleMember -Function Show-CorpusWindow
+Export-ModuleMember -Function Show-CorpusWindow,Start-CorpusRestart

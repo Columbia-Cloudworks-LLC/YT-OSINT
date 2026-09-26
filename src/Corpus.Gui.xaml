@@ -1,4 +1,4 @@
-<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="YT-OSINT | YouTube Corpus" Width="1280" Height="820" MinWidth="1000" MinHeight="680" WindowStartupLocation="CenterScreen" Background="#F3F5F8" FontFamily="Segoe UI" FontSize="13">
+﻿<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="YT-OSINT | YouTube Corpus" Width="1280" Height="820" MinWidth="1000" MinHeight="680" WindowStartupLocation="CenterScreen" Background="#F3F5F8" FontFamily="Segoe UI" FontSize="13">
 <Window.Resources>
 <Style TargetType="Button"><Setter Property="Padding" Value="14,7"/><Setter Property="Margin" Value="4"/><Setter Property="MinHeight" Value="34"/></Style>
 <Style TargetType="TextBox"><Setter Property="Padding" Value="7"/><Setter Property="Margin" Value="4"/><Setter Property="MinHeight" Value="34"/></Style>
@@ -27,11 +27,12 @@
 <ComboBox x:Name="DependencyChannel" SelectedIndex="0" MinWidth="130"><ComboBoxItem Content="stable"/><ComboBoxItem Content="nightly"/></ComboBox>
 <Button x:Name="CheckDependencies" Content="Check now"/>
 <Button x:Name="UpdateDependencies" Content="Update selected"/>
+<Button x:Name="RestartApplication" Content="Restart now" Visibility="Collapsed"/>
 <Button x:Name="RecoverDependencies" Content="Recover interrupted update"/>
 </WrapPanel>
 <TextBlock x:Name="DependencyNotice" Text="Select the checkboxes for updates to install. FFmpeg and ffprobe are updated as one pair." Margin="4,8" TextWrapping="Wrap"/>
 </StackPanel>
-<TextBlock DockPanel.Dock="Bottom" Text="Downloads are verified before installation. Native changes require UAC. Backups are retained. Restart after updating. Pester stays pinned for development; Windows services PowerShell and .NET." Margin="4,12" TextWrapping="Wrap"/>
+<TextBlock DockPanel.Dock="Bottom" Text="Tools are installed in your user folder. YT-OSINT restarts automatically after updates." Margin="4,12" TextWrapping="Wrap"/>
 <DataGrid x:Name="DependenciesGrid" AutoGenerateColumns="False" IsReadOnly="False" Margin="4" CanUserSortColumns="True">
 <DataGrid.Columns>
 <DataGridCheckBoxColumn Header="Update" Binding="{Binding Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"><DataGridCheckBoxColumn.ElementStyle><Style TargetType="CheckBox"><Setter Property="IsEnabled" Value="{Binding CanUpdate}"/></Style></DataGridCheckBoxColumn.ElementStyle></DataGridCheckBoxColumn>

@@ -250,3 +250,71 @@ Describe 'Maintenance failure reporting' {
         $events[-1].Message | Should Match 'checksum mismatch'
     }
 }
+
+Describe 'Download completion output regression' {
+    It 'does not leak the asynchronous task result into the update plan' {
+        $ctx=New-DependencyTestContext
+        Mock New-CorpusDependencyWebClient -ModuleName Corpus.Dependencies {
+            $client=[pscustomobject]@{Headers=@{}}
+            $client | Add-Member ScriptMethod DownloadFileTaskAsync {param($url,$path) [Threading.Tasks.Task]::FromResult([object]'internal task result')}
+            $client | Add-Member ScriptMethod CancelAsync {}
+            $client | Add-Member ScriptMethod Dispose {}
+            return $client
+        }
+        @(Receive-CorpusDependency $ctx 'https://example.com/test' (Join-Path $ctx.Root download)).Count | Should Be 0
+    }
+}
+Describe 'User-owned native installation orchestration' {
+    BeforeEach {
+        $ctx=New-DependencyTestContext
+        $previousLocalAppData=$env:LOCALAPPDATA
+        $env:LOCALAPPDATA=Join-Path $ctx.Root 'User Profile With Spaces'
+        $ctx.Shared=[hashtable]::Synchronized(@{Cancel=$false;Progress=$null;Messages=[Collections.Concurrent.ConcurrentQueue[string]]::new()})
+        Mock Get-CorpusDependencyRelease -ModuleName Corpus.Dependencies {
+            param($Name,$Channel)
+            # SHA256 of the fixture byte sequence written by the download mock.
+            $bytes=[Text.Encoding]::UTF8.GetBytes('fixture')
+            $hash=([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($bytes))).Replace('-','').ToLowerInvariant()
+            [pscustomobject]@{Name=$Name;Version='2026.08.19';Channel=$Channel;Url='https://example.com/yt-dlp.exe';Hash=$hash;Algorithm='SHA256';Base64=$false;FileName='yt-dlp.exe'}
+        }
+        Mock Receive-CorpusDependency -ModuleName Corpus.Dependencies {param($Context,$Url,$Path) [IO.File]::WriteAllText($Path,'fixture')}
+        Mock Invoke-CorpusProcess -ModuleName Corpus.Dependencies { [pscustomobject]@{ExitCode=0;StdOut='2026.08.19';StdErr=''} }
+    }
+    AfterEach {$env:LOCALAPPDATA=$previousLocalAppData}
+    It 'installs to LocalAppData without elevation and returns one result' {
+        $rows=@(Invoke-CorpusDependencyUpdate $ctx @([pscustomobject]@{Name='yt-dlp';AvailableVersion='2026.08.19'}))
+        $rows.Count | Should Be 1
+        $rows[0].Status | Should Be Updated
+        [IO.File]::ReadAllText((Join-Path (Get-CorpusNativeRoot) 'yt-dlp.exe')) | Should Be fixture
+        $ctx.Shared.DependenciesChanged | Should Be $true
+        $ctx.Shared.CommitInProgress | Should Be $false
+        @(Get-CorpusDependencyRecovery).Count | Should Be 0
+    }
+    It 'replaces a user copy and retains the original for recovery' {
+        $target=Join-Path (Get-CorpusNativeRoot) 'yt-dlp.exe'
+        [IO.Directory]::CreateDirectory((Get-CorpusNativeRoot)) | Out-Null
+        [IO.File]::WriteAllText($target,'previous')
+        $null=Invoke-CorpusDependencyUpdate $ctx @([pscustomobject]@{Name='yt-dlp';AvailableVersion='2026.08.19'})
+        $journalPath=(Get-ChildItem (Join-Path (Get-CorpusDependencyHome) 'updates/results') -Filter '*.json')[0].FullName
+        $journal=Read-CorpusJson $journalPath
+        [IO.File]::ReadAllText((Join-Path $journal.BackupDirectory 'yt-dlp.exe')) | Should Be previous
+        $journal.Status='Committing';Write-CorpusJson $journalPath $journal
+        @(Get-CorpusDependencyRecovery).Count | Should Be 1
+        $null=Repair-CorpusDependencies $ctx
+        [IO.File]::ReadAllText($target) | Should Be previous
+    }
+    It 'reports a verification failure without leaving commit or restart flags set' {
+        Mock Invoke-CorpusProcess -ModuleName Corpus.Dependencies {throw 'Fixture version mismatch'}
+        {Invoke-CorpusDependencyUpdate $ctx @([pscustomobject]@{Name='yt-dlp';AvailableVersion='2026.08.19'})} | Should Throw
+        $ctx.Shared.CommitInProgress | Should Be $false
+        [bool]$ctx.Shared['DependenciesChanged'] | Should Be $false
+        Test-Path (Join-Path (Get-CorpusNativeRoot) 'yt-dlp.exe') | Should Be $false
+    }
+    It 'routes yt-dlp, FFmpeg and Deno to the managed user directory' {
+        Import-Module (Join-Path $project 'src/Corpus.YouTube.psm1') -Force
+        $args=@(Get-CorpusYtArguments)
+        $args[$args.IndexOf('--ffmpeg-location')+1] | Should Be (Get-CorpusNativeRoot)
+        $args[$args.IndexOf('--js-runtimes')+1] | Should Be ('deno:'+(Join-Path (Get-CorpusNativeRoot) 'deno.exe'))
+        ($args -contains '--no-js-runtimes') | Should Be $true
+    }
+}

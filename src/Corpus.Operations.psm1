@@ -22,7 +22,7 @@ function Invoke-CorpusOperation {
             $run=[pscustomobject][ordered]@{RunId=$ctx.RunId;StartTimestamp=[datetime]::UtcNow.ToString('o');EndTimestamp=$null;Machine=$env:COMPUTERNAME;WindowsVersion=[Environment]::OSVersion.VersionString;PowerShellVersion=$PSVersionTable.PSVersion.ToString();YtDlpVersion='Unavailable';FFmpegVersion='Unavailable';ImportExcelVersion='Unavailable';ChannelsRequested=0;VideosDiscovered=0;VideosAdded=0;VideosAlreadyKnown=0;TranscriptsAdded=0;TranscriptsUnavailable=0;Failures=0;FinalState='Running'}
             Write-CorpusJson (Join-Path $Root "data/normalized/runs/$($ctx.RunId).json") $run
             foreach($name in @('yt-dlp','ffmpeg')) {
-                try {$r=Invoke-CorpusProcess $ctx (Join-Path $env:SystemRoot "$name.exe") @($(if($name -eq 'yt-dlp'){'--version'}else{'-version'})) -Quiet; if($r.ExitCode -eq 0){$value=($r.StdOut -split '\r?\n')[0];if($name -eq 'yt-dlp'){$run.YtDlpVersion=$value}else{$run.FFmpegVersion=$value}}}catch{Write-CorpusLog $ctx Warning Versions $name $_.Exception.Message}
+                try {$r=Invoke-CorpusProcess $ctx (Join-Path (Get-CorpusNativeRoot) "$name.exe") @($(if($name -eq 'yt-dlp'){'--version'}else{'-version'})) -Quiet; if($r.ExitCode -eq 0){$value=($r.StdOut -split '\r?\n')[0];if($name -eq 'yt-dlp'){$run.YtDlpVersion=$value}else{$run.FFmpegVersion=$value}}}catch{Write-CorpusLog $ctx Warning Versions $name $_.Exception.Message}
             }
             $dependencySettings=Get-CorpusDependencySettings $Root
             $im=if($dependencySettings.ImportExcelPath){Test-ModuleManifest -Path $dependencySettings.ImportExcelPath -ErrorAction Stop}else{Get-Module -ListAvailable ImportExcel | Sort-Object Version -Descending | Select-Object -First 1}

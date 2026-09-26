@@ -1,11 +1,13 @@
 ﻿Set-StrictMode -Version 2
 function Get-CorpusYtArguments {
+    $nativeRoot=Get-CorpusNativeRoot
+    @('--ffmpeg-location',$nativeRoot,'--no-js-runtimes','--js-runtimes',('deno:'+(Join-Path $nativeRoot 'deno.exe')))
     @('--ignore-config','--no-color','--no-progress','--encoding','utf-8','--socket-timeout','30','--retries','2','--extractor-retries','2','--skip-download')
 }
 function Get-CorpusMetadata {
     param($Context,[string]$Url)
     $url=Assert-CorpusYouTubeUrl $Url
-    $r=Invoke-CorpusProcess $Context (Join-Path $env:SystemRoot 'yt-dlp.exe') ((Get-CorpusYtArguments)+@('--no-playlist','--dump-single-json','--',$url)) -Quiet
+    $r=Invoke-CorpusProcess $Context (Join-Path (Get-CorpusNativeRoot) 'yt-dlp.exe') ((Get-CorpusYtArguments)+@('--no-playlist','--dump-single-json','--',$url)) -Quiet
     if($r.ExitCode) { throw "yt-dlp metadata retrieval failed (exit $($r.ExitCode)). See the run log for details." }
     try { $meta=$r.StdOut | ConvertFrom-Json } catch { throw 'yt-dlp returned invalid metadata JSON.' }
     if((Get-CorpusProperty $meta id '') -notmatch '^[A-Za-z0-9_-]{11}$') { throw 'The URL did not resolve to an individual YouTube video.' }
@@ -76,7 +78,7 @@ function Import-CorpusVideo {
             [IO.Directory]::CreateDirectory($stage) | Out-Null
             try {
                 $flag=if($sub.Source -eq 'Manual'){'--write-subs'}else{'--write-auto-subs'}
-                $r=Invoke-CorpusProcess $Context (Join-Path $env:SystemRoot 'yt-dlp.exe') ((Get-CorpusYtArguments)+@('--load-info-json',$raw,$flag,'--sub-langs',$sub.Language,'--sub-format','vtt','--output',(Join-Path $stage '%(id)s.%(ext)s')))
+                $r=Invoke-CorpusProcess $Context (Join-Path (Get-CorpusNativeRoot) 'yt-dlp.exe') ((Get-CorpusYtArguments)+@('--load-info-json',$raw,$flag,'--sub-langs',$sub.Language,'--sub-format','vtt','--output',(Join-Path $stage '%(id)s.%(ext)s')))
                 if($r.ExitCode) { throw "Subtitle retrieval failed (yt-dlp exit $($r.ExitCode))." }
                 $file=@(Get-ChildItem $stage -Filter '*.vtt')
                 if(-not $file.Count) { throw 'yt-dlp reported captions but did not produce a VTT file.' }
@@ -118,7 +120,7 @@ function Sync-CorpusChannel {
         Set-CorpusProgress $Context 'Channel enumeration' $url 0 0
         $args=(Get-CorpusYtArguments)+@('--flat-playlist','--dump-single-json','--ignore-errors')
         if($Limit -gt 0){$args+=@('--playlist-end',"$Limit")}
-        $r=Invoke-CorpusProcess $Context (Join-Path $env:SystemRoot 'yt-dlp.exe') ($args+@('--',$url)) -TimeoutSeconds 1800 -Quiet
+        $r=Invoke-CorpusProcess $Context (Join-Path (Get-CorpusNativeRoot) 'yt-dlp.exe') ($args+@('--',$url)) -TimeoutSeconds 1800 -Quiet
         if($r.ExitCode){throw "Channel enumeration failed (yt-dlp exit $($r.ExitCode))."}
         $listing=$r.StdOut | ConvertFrom-Json
         $id=Get-CorpusProperty $listing channel_id (Get-CorpusProperty $listing id '')

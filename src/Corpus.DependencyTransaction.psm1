@@ -54,7 +54,7 @@ function Install-CorpusNativeTransaction {
         $beforeAcl=if($exists){[IO.File]::GetAccessControl($target).GetSecurityDescriptorSddlForm([Security.AccessControl.AccessControlSections]::Access)}else{''}
         $entries+=[pscustomobject]@{Name=$file;Existed=$exists;BeforeAcl=$beforeAcl;BeforeHash=$before;AfterHash=(Get-CorpusFileDigest (Join-Path $Candidate $file))}
     }
-    $journal=[pscustomobject]@{Name=$Name;Version=$Version;Status='Committing';Message='Replacing verified binaries.';StartedAt=[datetime]::UtcNow.ToString('o');Entries=$entries;BackupDirectory=$backupDir}
+    $journal=[pscustomobject]@{Name=$Name;Version=$Version;TransactionId=(Split-Path $TransactionRoot -Leaf);Status='Committing';Message='Replacing verified binaries.';StartedAt=[datetime]::UtcNow.ToString('o');Entries=$entries;BackupDirectory=$backupDir}
     # Journal all members before replacing any. Recovery handles both untouched and replaced members.
     Write-CorpusJson $JournalPath $journal
     try {

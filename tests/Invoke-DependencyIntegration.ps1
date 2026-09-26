@@ -8,26 +8,34 @@ $project=Split-Path $PSScriptRoot -Parent
 foreach($module in @('Logging','Core','Process','Dependencies','DependencyTransaction')){
     Import-Module (Join-Path $project "src/Corpus.$module.psm1") -Force -Global
 }
-$ctx=New-CorpusContext ([IO.Path]::GetFullPath($TestRoot))
+$shared=[hashtable]::Synchronized(@{Cancel=$false;Progress=$null;Messages=[Collections.Concurrent.ConcurrentQueue[string]]::new()})
+$ctx=New-CorpusContext ([IO.Path]::GetFullPath($TestRoot)) $shared
+$installedRoot=Get-CorpusNativeRoot
+$originalLocalAppData=$env:LOCALAPPDATA
 $report=@()
-foreach($dependency in $Name){
-    Write-Host "Staging real $dependency release; installed dependencies will not be modified."
-    $plan=Save-CorpusDependencyPlan $ctx $dependency stable
-    if($dependency -ne 'ImportExcel'){
-        $target=Join-Path $TestRoot "targets/$dependency"
-        $transaction=Join-Path $TestRoot "transactions/$dependency"
-        foreach($dir in @($target,$transaction)){[IO.Directory]::CreateDirectory($dir) | Out-Null}
-        foreach($file in @(Get-CorpusNativeNames $dependency)){
-            $installed=Join-Path $env:SystemRoot $file
-            if(Test-Path -LiteralPath $installed){[IO.File]::Copy($installed,(Join-Path $target $file),$false)}
+try {
+    # Isolate this process's user tools; exercise the real update orchestrator, not just its transaction helper.
+    $env:LOCALAPPDATA=Join-Path $ctx.Root 'Isolated User Profile'
+    [IO.Directory]::CreateDirectory((Get-CorpusNativeRoot)) | Out-Null
+    foreach($dependency in $Name){
+        Write-Host "Testing real $dependency release in an isolated user folder."
+        if($dependency -eq 'ImportExcel'){
+            $plans=@(Save-CorpusDependencyPlan $ctx $dependency stable)
+            if($plans.Count -ne 1){throw 'Staging leaked internal output into the plan.'}
+            $version=$plans[0].Version
+        } else {
+            foreach($file in @(Get-CorpusNativeNames $dependency)){
+                $source=Join-Path $installedRoot $file
+                if(Test-Path $source){[IO.File]::Copy($source,(Join-Path (Get-CorpusNativeRoot) $file),$false)}
+            }
+            $result=@(Invoke-CorpusDependencyUpdate $ctx @([pscustomobject]@{Name=$dependency;AvailableVersion=''}))
+            if($result.Count -ne 1 -or $result[0].Status -ne 'Updated'){throw 'Native update did not return one successful result.'}
+            $version=$result[0].Version
+            $null=Get-CorpusDependencyInstalled $ctx $dependency
         }
-        $journal=Join-Path $transaction transaction.json
-        Install-CorpusNativeTransaction $ctx $dependency $plan.Candidate $plan.Version $target $transaction $journal $plan.Baseline
-        if((Read-CorpusJson $journal).Status -ne 'Success'){throw 'Temporary native transaction failed.'}
-        Write-Host "Verified real replacement under $target"
-    } else {Write-Host 'Verified Gallery package and fresh-process XLSX round-trip; no module installed.'}
-    $report+=[pscustomobject]@{Name=$dependency;Version=$plan.Version;Source=$plan.Release.Url;Status='Passed';InstalledDependenciesModified=$false}
-    Write-CorpusJson (Join-Path $TestRoot integration-results.json) $report
-}
+        $report+=[pscustomobject]@{Name=$dependency;Version=$version;Status='Passed';InstalledDependenciesModified=$false}
+        Write-CorpusJson (Join-Path $TestRoot integration-results.json) $report
+    }
+} finally {$env:LOCALAPPDATA=$originalLocalAppData}
 $report | Format-Table
 Write-Host "Integration evidence: $TestRoot"

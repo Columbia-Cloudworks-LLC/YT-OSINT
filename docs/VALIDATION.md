@@ -2,6 +2,18 @@
 
 Validated on 2026-09-26. This report distinguishes deterministic application checks from network-dependent acceptance.
 
+## User-folder installation and automatic restart
+
+The native dependency location is now `%LOCALAPPDATA%\YT-OSINT\bin`. A real first installation downloaded and verified yt-dlp 2026.08.19, FFmpeg/ffprobe 9.0.2, and Deno 2.9.7 without elevation. The user removed the previous Windows-directory binaries; they are no longer required. ImportExcel 7.8.10 was already available in the user's module directory.
+
+The complete update orchestrator also passed against real upstream packages in an isolated user profile, including replacements of existing copies, candidate and installed-version checks, checksummed backups, and a shared GUI-style progress context. ImportExcel passed its package check and fresh-process workbook round-trip. This catches the previous asynchronous download output leak, which caused a missing `Name` property error before elevation could start.
+
+The deterministic suite now contains 60 tests, including the output-leak regression, user-path installation/replacement/recovery, failed candidate handling, and explicit FFmpeg/Deno path arguments. The tests preserve the real user's installed copies.
+
+`tests/Invoke-RestartIntegration.ps1` starts a real fresh Windows PowerShell process, verifies that it waits for the old window's close signal, then completes WPF startup using the same corpus path containing spaces. On update failure the GUI stays open and shows the error instead of hiding it behind another status check.
+
+The earlier Windows-directory/UAC implementation and original ingestion results below are historical; elevation no longer applies to dependency installation or updates. Successful full-channel caption ingestion is still a separate acceptance check.
+
 ## Dependency updater follow-up
 
 The explicit dependency manager was added and tested after the original corpus validation below. The current local suite passes **55 tests**, with no skipped or pending cases. New tests cover daily-cache reuse/expiration/channel invalidation, Unknown network results, Git-build version handling, SHA256/SHA512 rejection, ZIP traversal prevention, changed-release rejection, pair rollback after verification or file-lock failures, interrupted recovery, external-change protection, module promotion/rollback, and maintenance-lock exclusion.

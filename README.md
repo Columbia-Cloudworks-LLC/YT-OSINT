@@ -2,7 +2,7 @@
 
 A Windows-native PowerShell/WPF utility for collecting YouTube metadata and English transcripts into a local, searchable evidence corpus. Export a real Excel workbook, search neighboring transcript context, and open a video at the matching timestamp. No Excel installation, API key, web server, Python runtime, or database is required.
 
-**Validation status:** deterministic fixture tests and Windows WPF startup have been exercised. Live tests against both seeded channels were attempted with the machine's preserved yt-dlp 2025.01.26; current YouTube extraction failed. A successful full-channel transcript capture and a clean-machine UAC installation have **not** been demonstrated. See [validation details](docs/VALIDATION.md).
+**Validation status:** deterministic fixture tests and Windows WPF startup have been exercised. Live tests against both seeded channels were attempted with the machine's preserved yt-dlp 2025.01.26; current YouTube extraction failed. A successful full-channel transcript capture has **not** been demonstrated. See [validation details](docs/VALIDATION.md).
 
 ![Actual WPF application](docs/screenshot.png)
 
@@ -24,42 +24,33 @@ Execution-policy bypass applies only to that process. It does not change machine
 
 The initial subject is **Mo**, explicitly associated with `https://www.youtube.com/@atmoio` and `https://www.youtube.com/@lessbitter`. These are configuration entries, not special cases in application code. Importing is an explicit user action; startup does not sync channels.
 
-## Dependencies and elevation
+## Dependencies
 
-On startup a worker checks the exact paths `$env:SystemRoot\yt-dlp.exe`, `ffmpeg.exe`, and `ffprobe.exe`. Startup does not overwrite or upgrade existing executables. Explicit user-selected updates are handled separately in Settings → Dependencies. Each executable must return a valid version. A broken existing executable produces an actionable failure. The dependency page remains accessible so an explicit verified update can repair it.
+Native tools live in `%LOCALAPPDATA%\YT-OSINT\bin`: `yt-dlp.exe`, `ffmpeg.exe`, `ffprobe.exe`, and `deno.exe`. Installation and updates run as the current user without UAC. The app uses these exact paths, including yt-dlp's FFmpeg and JavaScript runtime options, without modifying PATH. Existing Windows-directory or PATH copies are not used or changed.
 
-Missing native binaries are installed by a separate bootstrap process elevated through UAC. The UI remains in the original user process. Rejecting UAC reports an installation failure; restart after resolving it. Once native binaries exist, startup does not request elevation again. The application does not modify PATH.
+Startup installs missing tools from verified upstream packages. Existing user-folder versions are preserved until you choose an update. FFmpeg and ffprobe are installed and repaired together. Deno is included for yt-dlp's YouTube support. ARM64 Windows requires x64 emulation for these binaries.
 
-Downloads use HTTPS and upstream SHA256 manifests. yt-dlp comes from its official GitHub release. The FFmpeg essentials ZIP comes from gyan.dev, a Windows build provider linked by ffmpeg.org. Only the missing `ffmpeg.exe`/`ffprobe.exe` archive entries are extracted. File copies refuse to replace an existing destination, including a race with another installer. ARM64 Windows requires x64 emulation for these binaries.
+ImportExcel is loaded if available; otherwise the verified Gallery package is installed into the current user's WindowsPowerShell module directory. Excel itself is unnecessary. Download and verification progress appear in the status bar; errors are saved in per-run logs. Settings remains accessible if installation fails.
 
-ImportExcel is loaded if already available; otherwise the bootstrap installs it from PowerShell Gallery with `-Scope CurrentUser`. NuGet is installed in that scope if needed. Excel itself is unnecessary. Installation source, time, path, detected version, and outcome are recorded in `logs/dependencies.jsonl`. Download, extraction, and verification stages appear in the persistent bottom status bar. Bootstrap cancellation is disabled while elevated installation is in flight; closing the window waits for it to finish.
+**Existing yt-dlp versions may stop working when YouTube changes.** Use Settings → Dependencies to check and update. Do not interpret extraction failures as empty channels.
 
-**Existing yt-dlp versions may stop working when YouTube changes.** Use Settings → Dependencies to check and explicitly update the managed executable. Do not interpret a channel extraction failure as an empty channel.
-
-Authoritative references: [yt-dlp](https://github.com/yt-dlp/yt-dlp), [FFmpeg Windows build providers](https://ffmpeg.org/download.html), [gyan.dev releases](https://www.gyan.dev/ffmpeg/builds/), [ImportExcel](https://github.com/dfinke/ImportExcel).
+Sources: [yt-dlp](https://github.com/yt-dlp/yt-dlp), [Gyan FFmpeg essentials](https://www.gyan.dev/ffmpeg/builds/), [Deno](https://github.com/denoland/deno), and [ImportExcel](https://www.powershellgallery.com/packages/ImportExcel).
 
 ## Safe dependency updates
 
 ![Dependency management page](docs/dependencies.png)
 
-Settings → Dependencies manages **yt-dlp**, the **FFmpeg/ffprobe pair**, **Deno**, and **ImportExcel**. Deno is the optional managed JavaScript runtime for current yt-dlp YouTube support; a missing runtime is shown as Missing and installed only when selected. Its managed location is `$env:SystemRoot\deno.exe`; unrelated runtimes elsewhere on PATH are not changed.
+Settings → Dependencies shows installed and available versions, providers, and paths. Startup checks releases in the background at most once every 24 hours; **Check now** bypasses the cache. Checks only fetch metadata and probe local versions. Network failures show **Unknown** and disable the affected update. GitHub requests are unauthenticated and may be rate limited.
 
-Startup performs background release checks at most once every 24 hours. Check now bypasses the cache. Checks fetch small upstream metadata and run local version probes; they do not download packages, request UAC, or modify installed dependencies. Network failures show **Unknown**, with the error and last-check time, and are cached for the same interval to avoid retry storms. Installed versions are re-read even when release metadata is cached. GitHub requests are unauthenticated and can be rate limited.
+Select dependencies and press **Update selected**. The short confirmation tells you the application will restart automatically after successful updates. Changing yt-dlp's stable/nightly channel requires a new check; the preference is saved when the update succeeds. Unfamiliar FFmpeg versions are labeled **Different channel / build**; replacements use the Gyan essentials pair. Newer versions on the same channel are not automatically downgraded.
 
-Select update checkboxes and press **Update selected**. A review dialog shows each installed/target version and provider. Changing yt-dlp's channel requires a new check; the preference is saved after that update succeeds. An unfamiliar or Git FFmpeg build is labeled **Different channel / build**, never numerically compared to a stable version. Selecting it explicitly replaces both binaries with the gyan.dev **essentials release** pair. A full build may have capabilities used by other applications that the essentials build does not provide. An already-newer version on the same channel is not automatically downgraded.
+Updates download into user-owned staging and verify GitHub/Gyan SHA256 or Gallery SHA512 package hashes before running candidates. Native files are backed up, journaled, replaced, and verified again. A failure rolls back that dependency; FFmpeg/ffprobe are one rollback unit. ImportExcel versions are installed side by side and verified with a fresh-process XLSX round-trip before selecting the new manifest.
 
-The update workflow:
+After success, the GUI closes and relaunches with the same corpus root and the Dependencies page open. On failure or cancellation it stays open and shows the error. If some dependencies already changed, **Restart now** reloads them; imports remain disabled until restart. Closing during installation waits for a safe boundary and respects the request to close. Command-line updates report their result without opening a GUI.
 
-1. Fetch the reviewed release again; if its version changed, require another check.
-2. Download to local staging, verify GitHub/Gyan SHA256 or Gallery SHA512 package metadata, extract only the required native binaries, and check candidate versions. ImportExcel is tested in a fresh PowerShell process with an XLSX round-trip.
-3. For native updates only, request UAC. The elevated helper re-resolves the allowlisted upstream, copies the archive into protected staging, re-verifies its digest, and writes only the fixed SystemRoot executable names. It never accepts an arbitrary destination or trusts a manifest-supplied URL/hash.
-4. Preserve originals, write a durable transaction journal, replace the binaries, then verify versions and checksums. FFmpeg and ffprobe are one rollback unit. A failed replacement or verification restores the originals; unrelated selected dependencies are separate transactions.
-5. For ImportExcel, install the verified version side by side in the current user's WindowsPowerShell module directory. Preserve older versions, record the previous module selection, and atomically select the verified manifest for this corpus. Existing version directories are never overwritten.
-6. Log results and require an application restart before another import/build. Cancel is available during staging; replacement/rollback finishes at a safe boundary. Closing the window also waits for that boundary.
+Session-wide locks exclude imports and other maintenance during installation. A durable journal supports recovery after interruption: use **Recover interrupted update** to restore the recorded originals. Recovery refuses to overwrite externally changed files. No elevation is involved.
 
-A session-wide mutex excludes other YT-OSINT imports/builds during maintenance. This does not coordinate unrelated programs using the same SystemRoot tools; Windows file-lock failures cause the update to fail safely. Replacing the pair is a journaled transaction, not a single filesystem atomic operation. After a power loss, startup blocks dependency use and Settings displays **Recovery required**. Use **Recover interrupted update** (UAC) to restore originals. Recovery refuses to overwrite files modified outside the recorded transaction and leaves a useful failure journal for manual investigation.
-
-Backups and journals live under `$env:SystemRoot\YT-OSINT-Updates`; only Administrators/SYSTEM can change them. Result journals are readable by users. Local settings, daily cache, staging, and ImportExcel rollback information live under `data/dependencies/`. Per-run logs record sources, versions, and outcomes. Backups are retained without automatic pruning; an administrator can remove completed transaction backups after validating the new version. Do not delete pending recovery records.
+Native staging, backups, and journals live in `%LOCALAPPDATA%\YT-OSINT\updates`. Completed downloads are removed; backups remain until you choose to remove them. Never delete pending recovery records. Per-corpus settings and the daily cache live in `data/dependencies/`; logs remain under `logs/`. This migration does not use old Windows-directory update journals or backups.
 
 Command-line equivalents (run from the repository):
 
@@ -187,6 +178,6 @@ powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\YouTubeCorpus.ps1
 - **Insufficient disk space:** free space and retry; per-item commits remain. Temporary/staging files from a forcibly terminated process can be removed after all application instances close.
 - **Very large corpora:** normalized files are read per video, but metadata/search result sets and EPPlus workbooks reside in memory. Expect increased memory use; use search filters. A database is intentionally not introduced.
 - **Cancellation delay:** child processes are stopped promptly; archive download/extraction during elevated bootstrap and a final workbook serialization complete at safe boundaries. No UI-thread `DoEvents()` loop is used.
-- **Full Windows acceptance remains manual:** clean-machine installation/UAC, interactive browser timestamp navigation, and a successful live full-channel caption import require validation in a suitable Windows environment. Do not equate passing offline tests with those checks.
+- **Full Windows acceptance remains manual:** interactive browser timestamp navigation and a successful live full-channel caption import require validation in a suitable Windows environment. Do not equate passing offline tests with those checks.
 
 This is an evidence retrieval utility. It does not label statements true, false, contradictory, hypocritical, or misleading.

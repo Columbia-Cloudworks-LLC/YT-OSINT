@@ -1,4 +1,10 @@
 ﻿Set-StrictMode -Version 2
+function Get-CorpusDependencyHome {
+    if(-not $env:LOCALAPPDATA){throw 'The current user LocalAppData folder is unavailable.'}
+    return Join-Path $env:LOCALAPPDATA 'YT-OSINT'
+}
+function Get-CorpusNativeRoot { return Join-Path (Get-CorpusDependencyHome) 'bin' }
+
 $script:DependencyNames=@('yt-dlp','FFmpeg','Deno','ImportExcel')
 
 function Get-CorpusDependencySettings {
@@ -99,11 +105,11 @@ function Get-CorpusDependencyInstalled {
         return [pscustomobject]@{Version=$(if($module){$module.Version.ToString()}else{''});Path=$(if($module){$module.Path}else{'CurrentUser module directory'});Channel='stable'}
     }
     $file=if($Name -eq 'yt-dlp'){'yt-dlp.exe'}elseif($Name -eq 'FFmpeg'){'ffmpeg.exe'}else{'deno.exe'}
-    $path=Join-Path $env:SystemRoot $file
+    $path=Join-Path (Get-CorpusNativeRoot) $file
     $line=Get-CorpusNativeVersion $Context $path ([IO.Path]::GetFileNameWithoutExtension($file))
     $channel='stable'
     if($Name -eq 'FFmpeg') {
-        $probe=Get-CorpusNativeVersion $Context (Join-Path $env:SystemRoot 'ffprobe.exe') ffprobe
+        $probe=Get-CorpusNativeVersion $Context (Join-Path (Get-CorpusNativeRoot) 'ffprobe.exe') ffprobe
         $version=if($line -match '^ffmpeg version (\S+)'){$Matches[1]}else{''}
         $probeVersion=if($probe -match '^ffprobe version (\S+)'){$Matches[1]}else{''}
         if($version -ne $probeVersion){return [pscustomobject]@{Version="$version / $probeVersion (mismatched pair)";Path="$path + ffprobe.exe";Channel='mixed'}}
@@ -126,7 +132,7 @@ function Compare-CorpusDependencyVersion {
 }
 
 function Get-CorpusDependencyRecovery {
-    $base=Join-Path $env:SystemRoot 'YT-OSINT-Updates/results'
+    $base=Join-Path (Get-CorpusDependencyHome) 'updates/results'
     if(Test-Path -LiteralPath $base){
         foreach($file in Get-ChildItem $base -Filter '*.json' -ErrorAction Stop){
             $journal=Read-CorpusJson $file.FullName
@@ -177,11 +183,13 @@ function Get-CorpusDependencyStatus {
     } finally {if($commitLock){$commitLock.ReleaseMutex();$commitLock.Dispose()};$lock.ReleaseMutex();$lock.Dispose()}
 }
 
+function New-CorpusDependencyWebClient { return [Net.WebClient]::new() }
+
 function Receive-CorpusDependency {
     param($Context,[string]$Url,[string]$Path)
     if(([uri]$Url).Scheme -ne 'https'){throw 'Dependency downloads require HTTPS.'}
     [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
-    $client=[Net.WebClient]::new();$client.Headers['User-Agent']='YT-OSINT'
+    $client=New-CorpusDependencyWebClient;$client.Headers['User-Agent']='YT-OSINT'
     $watch=[Diagnostics.Stopwatch]::StartNew()
     try {
         $task=$client.DownloadFileTaskAsync([uri]$Url,$Path)
@@ -190,7 +198,7 @@ function Receive-CorpusDependency {
             if($watch.Elapsed.TotalMinutes -gt 15){throw 'Dependency download timed out.'}
             Start-Sleep -Milliseconds 100
         }
-        $task.GetAwaiter().GetResult()
+        $null=$task.GetAwaiter().GetResult()
     } finally {$client.CancelAsync();$client.Dispose()}
 }
 
@@ -249,7 +257,7 @@ function Save-CorpusDependencyPlan {
     param($Context,[string]$Name,[string]$Channel='stable',[string]$ExpectedVersion='')
     $release=Get-CorpusDependencyRelease $Name $Channel
     if($ExpectedVersion -and $release.Version -ne $ExpectedVersion){throw "$Name release changed since the last check. Check again before updating."}
-    $stage=Join-Path $Context.Root ('data/dependencies/staging/'+[guid]::NewGuid().ToString('N'))
+    $stage=Join-Path (Get-CorpusDependencyHome) ('updates/transactions/'+[guid]::NewGuid().ToString('N'))
     [IO.Directory]::CreateDirectory($stage) | Out-Null
     Set-CorpusProgress $Context 'Downloading update' "$Name $($release.Version)" 0 0
     $archive=Join-Path $stage $release.FileName
@@ -261,7 +269,7 @@ function Save-CorpusDependencyPlan {
     Expand-CorpusDependency $archive $candidate $Name
     Test-CorpusDependencyCandidate $Context $Name $candidate $release.Version
     $names=if($Name -eq 'FFmpeg'){@('ffmpeg.exe','ffprobe.exe')}elseif($Name -eq 'Deno'){@('deno.exe')}elseif($Name -eq 'yt-dlp'){@('yt-dlp.exe')}else{@()}
-    $baseline=@(foreach($file in $names){$target=Join-Path $env:SystemRoot $file;[pscustomobject]@{Name=$file;Hash=$(if(Test-Path $target){Get-CorpusFileDigest $target}else{''})}})
+    $baseline=@(foreach($file in $names){$target=Join-Path (Get-CorpusNativeRoot) $file;[pscustomobject]@{Name=$file;Hash=$(if(Test-Path $target){Get-CorpusFileDigest $target}else{''})}})
     $plan=[pscustomobject]@{Name=$Name;Channel=$Channel;Version=$release.Version;Release=$release;Archive=$archive;Candidate=$candidate;Baseline=$baseline;Root=$Context.Root;Stage=$stage}
     Write-CorpusJson (Join-Path $stage 'plan.json') $plan
     Write-CorpusLog $Context Info Dependencies $Name "Verified $Name $($release.Version) from $($release.Url)."
@@ -303,7 +311,9 @@ function Invoke-CorpusDependencyUpdate {
     param($Context,[object[]]$Selection,[ValidateSet('stable','nightly')][string]$Channel='stable')
     if($null -eq $Selection -or -not $Selection.Count){throw 'Select dependencies to update first.'}
     $lock=Enter-CorpusDependencyLock
+    $commitLock=$null
     try {
+        $commitLock=Enter-CorpusDependencyLock -Commit
         if(@(Get-CorpusDependencyRecovery).Count){throw 'Recover the interrupted native update before installing further updates.'}
         $results=@()
         foreach($selected in $Selection){
@@ -315,28 +325,18 @@ function Invoke-CorpusDependencyUpdate {
             if($Context.Shared){$Context.Shared.CommitInProgress=$true}
             if($plan.Name -eq 'ImportExcel') {Install-CorpusDependencyModule $Context $plan}
             else {
-                $helper=Join-Path (Split-Path $PSScriptRoot -Parent) 'Update-Dependencies.ps1'
-                $args=@('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$helper,'-NativeCommit','-PlanPath',(Join-Path $plan.Stage 'plan.json'))
-                $quoted=@($args | ForEach-Object {[YouTubeCorpus.ProcessRunner]::Quote($_)}) -join ' '
-                $process=$null
-                try {
-                    $process=Start-Process -FilePath (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe') -ArgumentList $quoted -Verb RunAs -WindowStyle Hidden -PassThru
-                    # Commit/rollback is deliberately non-cancellable. The UI continues pumping messages.
-                    while(-not $process.WaitForExit(200)){}
-                    $result=Read-CorpusJson (Join-Path $env:SystemRoot ('YT-OSINT-Updates/results/'+(Split-Path $plan.Stage -Leaf)+'.json'))
-                    if($process.ExitCode -ne 0 -or -not $result -or $result.Status -ne 'Success'){
-                        $reason=if($result){$result.Message}else{'No successful result was returned.'}
-                        throw "Native update failed: $reason"
-                    }
-                } catch {throw "Could not update $($plan.Name). UAC approval is required. $($_.Exception.Message)"}
-                finally {if($process){$process.Dispose()}}
+                $target=Get-CorpusNativeRoot
+                [IO.Directory]::CreateDirectory($target) | Out-Null
+                $journal=Join-Path (Get-CorpusDependencyHome) ('updates/results/'+(Split-Path $plan.Stage -Leaf)+'.json')
+                Install-CorpusNativeTransaction $Context $plan.Name $plan.Candidate $plan.Version $target $plan.Stage $journal $plan.Baseline
             }
-            if($Context.Shared){$Context.Shared.CommitInProgress=$false}
+            if($Context.Shared){$Context.Shared.CommitInProgress=$false;$Context.Shared.DependenciesChanged=$true}
             if($plan.Name -eq 'yt-dlp'){
                 $settings=Get-CorpusDependencySettings $Context.Root;$settings.YtDlpChannel=$Channel
                 Write-CorpusJson (Join-Path $Context.Root 'data/dependencies/settings.json') $settings
             }
-            Write-CorpusLog $Context Info Dependencies $plan.Name "Updated $($plan.Name) to $($plan.Version). Restart YT-OSINT before resuming work."
+            if(Test-Path -LiteralPath $plan.Archive){Remove-Item -LiteralPath $plan.Archive -Force}
+            Write-CorpusLog $Context Info Dependencies $plan.Name "Updated $($plan.Name) to $($plan.Version). Verification complete."
             $results+=[pscustomobject]@{Name=$plan.Name;Version=$plan.Version;Status='Updated';RestartRequired=$true}
         }
         return $results
@@ -346,7 +346,9 @@ function Invoke-CorpusDependencyUpdate {
     } finally {
         # Invalidate cached release checks after success or failure, without touching sources or corpus data.
         $cache=Join-Path $Context.Root 'data/dependencies/checks.json'
-        if(Test-Path $cache){Remove-Item -LiteralPath $cache -Force}
+        if(Test-Path $cache){Remove-Item -LiteralPath $cache -Force -ErrorAction SilentlyContinue}
+        if($Context.Shared){$Context.Shared.CommitInProgress=$false}
+        if($commitLock){$commitLock.ReleaseMutex();$commitLock.Dispose()}
         $lock.ReleaseMutex();$lock.Dispose()
     }
 }
@@ -355,18 +357,17 @@ Export-ModuleMember -Function *-Corpus*
 function Repair-CorpusDependencies {
     param($Context)
     $lock=Enter-CorpusDependencyLock
-    $process=$null
+    $commitLock=$null
     try {
-        $id=[guid]::NewGuid().ToString('N')
-        $helper=Join-Path (Split-Path $PSScriptRoot -Parent) 'Update-Dependencies.ps1'
-        $args=@('-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',$helper,'-RecoverNative','-ResultId',$id)
-        $quoted=@($args | ForEach-Object {[YouTubeCorpus.ProcessRunner]::Quote($_)}) -join ' '
-        $process=Start-Process -FilePath (Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe') -ArgumentList $quoted -Verb RunAs -WindowStyle Hidden -PassThru
-        while(-not $process.WaitForExit(200)){}
-        $result=Read-CorpusJson (Join-Path $env:SystemRoot "YT-OSINT-Updates/results/$id.json")
-        if($process.ExitCode -ne 0 -or -not $result -or $result.Status -ne 'Success'){throw 'Dependency recovery did not complete. See the protected transaction journals.'}
-        Write-CorpusLog $Context Info Dependencies '' $result.Message
-        return $result
-    } finally {if($process){$process.Dispose()};$lock.ReleaseMutex();$lock.Dispose()}
+        $commitLock=Enter-CorpusDependencyLock -Commit
+        $base=Get-CorpusDependencyHome
+        foreach($journal in @(Get-CorpusDependencyRecovery)){
+            $id=$journal.TransactionId
+            if($id -notmatch '^[a-f0-9]{32}$'){throw 'Invalid recovery transaction identifier.'}
+            Restore-CorpusNativeTransaction $Context (Join-Path $base "updates/results/$id.json") (Get-CorpusNativeRoot) (Join-Path $base "updates/transactions/$id")
+        }
+        Write-CorpusLog $Context Info Dependencies '' 'Interrupted transactions recovered.'
+        return [pscustomobject]@{Status='Success';Message='Interrupted transactions recovered.'}
+    } finally {if($commitLock){$commitLock.ReleaseMutex();$commitLock.Dispose()};$lock.ReleaseMutex();$lock.Dispose()}
 }
 Export-ModuleMember -Function *-Corpus*
