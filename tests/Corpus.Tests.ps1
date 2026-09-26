@@ -1,5 +1,5 @@
 ﻿$project=Split-Path $PSScriptRoot -Parent
-foreach($name in @('Logging','Core','Process','Transcript','YouTube','Excel','Operations')){Import-Module (Join-Path $project "src/Corpus.$name.psm1") -Force -Global}
+foreach($name in @('Logging','Core','Process','Dependencies','Transcript','YouTube','Excel','Operations')){Import-Module (Join-Path $project "src/Corpus.$name.psm1") -Force -Global}
 $fixture=Get-Content (Join-Path $PSScriptRoot 'fixtures/video.info.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $vtt=Join-Path $PSScriptRoot 'fixtures/rolling.en.vtt'
 Describe 'Configuration and stable identities' {

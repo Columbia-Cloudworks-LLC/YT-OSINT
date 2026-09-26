@@ -3,6 +3,8 @@ param([string]$Root='',[switch]$NativeOnly,[string]$ProgressPath='')
 $ErrorActionPreference='Stop'
 if(-not $Root){ $Root=Split-Path -Parent $MyInvocation.MyCommand.Path }
 Set-StrictMode -Version 2
+foreach($moduleName in @('Logging','Core','Process','Dependencies')){Import-Module (Join-Path $PSScriptRoot "src/Corpus.$moduleName.psm1") -Force -Global}
+$dependencyLock=$null
 [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12
 $logDir=Join-Path $Root 'logs'; [IO.Directory]::CreateDirectory($logDir) | Out-Null
 $log=Join-Path $logDir 'dependencies.jsonl'
@@ -37,6 +39,9 @@ function Get-DependencyVersion([string]$Path,[string]$Argument) {
     } finally {$p.Dispose()}
 }
 try {
+    # An elevated missing-dependency child is covered by its waiting parent.
+    if(-not $NativeOnly){$dependencyLock=Enter-CorpusDependencyLock}
+    if(@(Get-CorpusDependencyRecovery).Count){throw 'An interrupted dependency update requires recovery in Settings > Dependencies.'}
     if(-not $env:SystemRoot -or -not (Test-Path -LiteralPath $env:SystemRoot -PathType Container)){throw 'Windows SystemRoot could not be determined.'}
     $names=@('yt-dlp.exe','ffmpeg.exe','ffprobe.exe')
     $missing=@($names | Where-Object {-not (Test-Path -LiteralPath (Join-Path $env:SystemRoot $_))})
@@ -93,7 +98,7 @@ try {
         Set-DependencyProgress "Verifying $name"
         try {
             $version=Get-DependencyVersion $target $(if($name -eq 'yt-dlp.exe'){'--version'}else{'-version'})
-            Write-DependencyEvent $name '' $target $version 'Verified' 'Existing binaries are never replaced.'
+            Write-DependencyEvent $name '' $target $version 'Verified' 'Startup verification preserves existing binaries; updates are user initiated.'
         } catch { Write-DependencyEvent $name '' $target '' 'Failed' $_.Exception.Message; throw "Dependency $name failed verification at $target. Existing files were preserved. $($_.Exception.Message)" }
     }
     if(-not $NativeOnly) {
@@ -102,7 +107,9 @@ try {
             if(-not (Get-PackageProvider -ListAvailable NuGet -ErrorAction SilentlyContinue)){Install-PackageProvider NuGet -MinimumVersion 2.8.5.201 -Scope CurrentUser -Force | Out-Null}
             Install-Module ImportExcel -Repository PSGallery -Scope CurrentUser -Force -ErrorAction Stop
         }
-        Import-Module ImportExcel -ErrorAction Stop
+        $dependencySettings=Get-CorpusDependencySettings $Root
+        if($dependencySettings.ImportExcelPath){Import-Module $dependencySettings.ImportExcelPath -ErrorAction Stop}
+        else {Import-Module ImportExcel -ErrorAction Stop}
         $module=Get-Module ImportExcel
         Write-DependencyEvent 'ImportExcel' 'https://www.powershellgallery.com/packages/ImportExcel' $module.ModuleBase $module.Version.ToString() 'Verified' 'Imported successfully.'
     }
@@ -111,4 +118,6 @@ try {
     Write-DependencyEvent 'Bootstrap' '' '' '' 'Failed' $_.Exception.Message
     if($NativeOnly){ Write-Error $_ -ErrorAction Continue; exit 1 }
     throw
+} finally {
+    if($dependencyLock){$dependencyLock.ReleaseMutex();$dependencyLock.Dispose()}
 }

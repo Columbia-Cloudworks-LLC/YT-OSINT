@@ -3,8 +3,12 @@ function Invoke-CorpusOperation {
     param([string]$Root,[string]$Operation,$Arguments=@{},$Shared=$null)
     $ctx=New-CorpusContext $Root $Shared
     # A file handle lock excludes other GUI/CLI writers; crashes release it automatically.
-    $lock=$null; $run=$null
+    $lock=$null; $run=$null; $dependencyLock=$null
     try {
+        if($Operation -in @('SyncAll','SyncChannel','Video','Build')) {
+            $dependencyLock=Enter-CorpusDependencyLock
+            if(@(Get-CorpusDependencyRecovery).Count){throw 'An interrupted dependency update requires recovery in Settings > Dependencies.'}
+        }
         if($Operation -notin @('Search','Refresh')) {
             try{$lock=[IO.File]::Open((Join-Path $Root 'data/corpus.lock'),[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)}catch{throw 'Another application instance is writing this corpus. Wait for it to finish.'}
         }
@@ -69,6 +73,7 @@ function Invoke-CorpusOperation {
     } finally {
         if($run){Write-CorpusJson (Join-Path $Root "data/normalized/runs/$($ctx.RunId).json") $run}
         if($lock){$lock.Dispose()}
+        if($dependencyLock){$dependencyLock.ReleaseMutex();$dependencyLock.Dispose()}
     }
 }
 Export-ModuleMember -Function Invoke-CorpusOperation

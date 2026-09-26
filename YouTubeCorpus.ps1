@@ -9,7 +9,7 @@ if(-not $Root){ $Root=Split-Path -Parent $MyInvocation.MyCommand.Path }
 Set-StrictMode -Version 2
 if(-not $env:SystemRoot){throw 'YT-OSINT requires Windows PowerShell 5.1 on Windows.'}
 $Root=[IO.Path]::GetFullPath($Root).TrimEnd('\','/')
-foreach($name in @('Logging','Core','Process','Transcript','YouTube','Excel','Operations','Gui')){Import-Module (Join-Path $PSScriptRoot "src/Corpus.$name.psm1") -Force -Global}
+foreach($name in @('Logging','Core','Process','Dependencies','Transcript','YouTube','Excel','Operations','Gui')){Import-Module (Join-Path $PSScriptRoot "src/Corpus.$name.psm1") -Force -Global}
 $null=New-CorpusContext $Root
 if($Action -eq 'Gui') {
     if([Threading.Thread]::CurrentThread.ApartmentState -ne 'STA'){throw 'Start the GUI with powershell.exe -STA -File YouTubeCorpus.ps1 or use the batch launcher.'}

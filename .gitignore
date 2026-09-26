@@ -8,3 +8,5 @@
 *.tmp
 *.xlsx
 TestResults.xml
+
+/work/

@@ -1,7 +1,9 @@
 ﻿Set-StrictMode -Version 2
 function Export-CorpusWorkbook {
     param($Context,[string]$Path='',$RunOverride=$null)
-    Import-Module ImportExcel -ErrorAction Stop
+    $dependencySettings=Get-CorpusDependencySettings $Context.Root
+    if($dependencySettings.ImportExcelPath){Import-Module $dependencySettings.ImportExcelPath -ErrorAction Stop}
+    else {Import-Module ImportExcel -ErrorAction Stop}
     if(-not $Path){$Path=Join-Path $Context.Root 'output/YouTubeCorpus.xlsx'}
     $Path=[IO.Path]::GetFullPath($Path); [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($Path)) | Out-Null
     $temp=Join-Path ([IO.Path]::GetDirectoryName($Path)) ('.corpus-'+[guid]::NewGuid().ToString('N')+'.xlsx')

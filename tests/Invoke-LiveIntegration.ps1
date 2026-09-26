@@ -1,10 +1,10 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param([int]$Limit=2,[string]$TestRoot=(Join-Path ([IO.Path]::GetTempPath()) ('YT-OSINT-integration-'+[guid]::NewGuid().ToString('N'))))
 $ErrorActionPreference='Stop'
 $project=Split-Path $PSScriptRoot -Parent
 [IO.Directory]::CreateDirectory($TestRoot) | Out-Null
 Copy-Item (Join-Path $project config.json) (Join-Path $TestRoot config.json)
-foreach($name in @('Logging','Core','Process','Transcript','YouTube','Excel','Operations')){Import-Module (Join-Path $project "src/Corpus.$name.psm1") -Force -Global}
+foreach($name in @('Logging','Core','Process','Dependencies','Transcript','YouTube','Excel','Operations')){Import-Module (Join-Path $project "src/Corpus.$name.psm1") -Force -Global}
 & (Join-Path $project Install-Dependencies.ps1) -Root $TestRoot
 $results=@()
 foreach($iteration in 1..2) {

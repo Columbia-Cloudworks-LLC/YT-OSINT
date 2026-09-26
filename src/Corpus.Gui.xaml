@@ -16,5 +16,37 @@
 <TabItem Header="Corpus"><DockPanel Margin="12"><WrapPanel DockPanel.Dock="Top"><TextBox x:Name="CorpusFilter" Width="330" ToolTip="Filter by subject, channel, title, ID or status"/><Button x:Name="FilterCorpus" Content="Filter"/><Button x:Name="Build" Content="Build Excel workbook"/><Button x:Name="OpenWorkbook" Content="Open workbook"/></WrapPanel><DataGrid x:Name="CorpusGrid" Margin="4,12,4,4"/></DockPanel></TabItem>
 <TabItem Header="Search"><DockPanel Margin="12"><StackPanel DockPanel.Dock="Top"><WrapPanel><TextBox x:Name="Query" Width="470" ToolTip="Transcript text (literal, case insensitive)"/><Button x:Name="Search" Content="Search transcripts"/><Button x:Name="OpenResult" Content="Open at timestamp"/></WrapPanel><WrapPanel><ComboBox x:Name="SearchSubject" DisplayMemberPath="name"/><Button x:Name="ClearSearchSubject" Content="All subjects"/><TextBox x:Name="SearchChannel" Width="180" ToolTip="Channel name or ID"/><TextBox x:Name="SearchVideo" Width="180" ToolTip="Video title or ID"/></WrapPanel><WrapPanel><TextBlock Text="Published from" VerticalAlignment="Center" Margin="4"/><DatePicker x:Name="DateFrom" Width="160" Margin="4"/><TextBlock Text="through" VerticalAlignment="Center" Margin="4"/><DatePicker x:Name="DateTo" Width="160" Margin="4"/></WrapPanel></StackPanel><TextBox x:Name="ContextText" DockPanel.Dock="Bottom" Height="105" IsReadOnly="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" ToolTip="Preceding, matching and following transcript context"/><DataGrid x:Name="SearchGrid" Margin="4,12,4,4"/></DockPanel></TabItem>
 <TabItem Header="Logs / Status"><DockPanel Margin="12"><Button x:Name="OpenLogs" DockPanel.Dock="Top" Content="Open logs folder" HorizontalAlignment="Left"/><TextBox x:Name="LogText" IsReadOnly="True" FontFamily="Consolas" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/></DockPanel></TabItem>
-<TabItem Header="Settings"><StackPanel Margin="24"><TextBlock Text="Local corpus settings" FontSize="22"/><TextBlock x:Name="Paths" Margin="0,20" TextWrapping="Wrap"/><TextBlock Text="English manual captions are preferred; English automatic captions are used when manual captions are unavailable.&#10;&#10;Dependencies are checked on startup. Existing Windows binaries are preserved.&#10;&#10;Edit source associations in Subjects. Config changes take effect on the next operation.&#10;&#10;One writer runs at a time. Search, imports and Excel builds execute in a background runspace." TextWrapping="Wrap"/><WrapPanel Margin="0,20"><Button x:Name="OpenData" Content="Open data folder"/><Button x:Name="OpenConfig" Content="Open configuration"/></WrapPanel></StackPanel></TabItem>
+<TabItem Header="Settings">
+<TabControl Margin="12">
+<TabItem Header="Dependencies"><DockPanel Margin="12">
+<StackPanel DockPanel.Dock="Top">
+<TextBlock Text="Dependency updates" FontSize="22" Margin="4,0,4,8"/>
+<TextBlock Text="Automatic checks run at most once daily. Updates run only when you select them. Check failures appear as Unknown." TextWrapping="Wrap" Margin="4"/>
+<WrapPanel>
+<TextBlock Text="yt-dlp channel" VerticalAlignment="Center" Margin="4"/>
+<ComboBox x:Name="DependencyChannel" SelectedIndex="0" MinWidth="130"><ComboBoxItem Content="stable"/><ComboBoxItem Content="nightly"/></ComboBox>
+<Button x:Name="CheckDependencies" Content="Check now"/>
+<Button x:Name="UpdateDependencies" Content="Update selected"/>
+<Button x:Name="RecoverDependencies" Content="Recover interrupted update"/>
+</WrapPanel>
+<TextBlock x:Name="DependencyNotice" Text="Select the checkboxes for updates to install. FFmpeg and ffprobe are updated as one pair." Margin="4,8" TextWrapping="Wrap"/>
+</StackPanel>
+<TextBlock DockPanel.Dock="Bottom" Text="Downloads are verified before installation. Native changes require UAC. Backups are retained. Restart after updating. Pester stays pinned for development; Windows services PowerShell and .NET." Margin="4,12" TextWrapping="Wrap"/>
+<DataGrid x:Name="DependenciesGrid" AutoGenerateColumns="False" IsReadOnly="False" Margin="4" CanUserSortColumns="True">
+<DataGrid.Columns>
+<DataGridCheckBoxColumn Header="Update" Binding="{Binding Selected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"><DataGridCheckBoxColumn.ElementStyle><Style TargetType="CheckBox"><Setter Property="IsEnabled" Value="{Binding CanUpdate}"/></Style></DataGridCheckBoxColumn.ElementStyle></DataGridCheckBoxColumn>
+<DataGridTextColumn Header="Dependency" Binding="{Binding Name}" IsReadOnly="True"/>
+<DataGridTextColumn Header="Installed" Binding="{Binding InstalledVersion}" IsReadOnly="True"/>
+<DataGridTextColumn Header="Available" Binding="{Binding AvailableVersion}" IsReadOnly="True"/>
+<DataGridTextColumn Header="Status" Binding="{Binding Status}" IsReadOnly="True"/>
+<DataGridTextColumn Header="Installed build" Binding="{Binding InstalledChannel}" IsReadOnly="True"/>
+<DataGridTextColumn Header="Target provider" Binding="{Binding Provider}" IsReadOnly="True"/>
+<DataGridTextColumn Header="Target channel" Binding="{Binding Channel}" IsReadOnly="True"/>
+<DataGridTextColumn Header="Path" Binding="{Binding Path}" IsReadOnly="True"/>
+<DataGridTextColumn Header="Last check (UTC)" Binding="{Binding LastCheck}" IsReadOnly="True"/>
+<DataGridTextColumn Header="Details" Binding="{Binding Detail}" IsReadOnly="True"/>
+</DataGrid.Columns></DataGrid>
+</DockPanel></TabItem>
+<TabItem Header="Storage"><StackPanel Margin="20"><TextBlock x:Name="Paths" TextWrapping="Wrap"/><WrapPanel Margin="0,20"><Button x:Name="OpenData" Content="Open data folder"/><Button x:Name="OpenConfig" Content="Open configuration"/></WrapPanel></StackPanel></TabItem>
+</TabControl></TabItem>
 </TabControl></DockPanel></Window>
