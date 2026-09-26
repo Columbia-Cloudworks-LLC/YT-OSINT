@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "subjects": [
+    {
+      "id": "mo",
+      "name": "Mo",
+      "channels": [
+        { "url": "https://www.youtube.com/@atmoio" },
+        { "url": "https://www.youtube.com/@lessbitter" }
+      ]
+    }
+  ]
+}

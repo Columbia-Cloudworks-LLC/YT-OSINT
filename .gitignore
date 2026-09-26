@@ -1,0 +1,10 @@
+/data/**
+!/data/**/
+!/data/**/.gitkeep
+/output/**
+!/output/.gitkeep
+/logs/**
+!/logs/.gitkeep
+*.tmp
+*.xlsx
+TestResults.xml
