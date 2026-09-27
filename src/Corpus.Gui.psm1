@@ -12,7 +12,7 @@ function Start-CorpusRestart {
     return [pscustomobject]@{Process=$process;SignalPath=$signal}
 }
 function Show-CorpusWindow {
-    param([string]$Root,[switch]$SkipDependencies,[switch]$SmokeTest,[string]$ScreenshotPath='',[switch]$SmokeCheckDependencies,[switch]$OpenDependencies,[switch]$SmokeCorpus)
+    param([string]$Root,[switch]$SkipDependencies,[switch]$SmokeTest,[string]$ScreenshotPath='',[switch]$SmokeCheckDependencies,[switch]$OpenDependencies,[switch]$SmokeCorpus,[scriptblock]$SmokeGridCheck)
     $appRoot=Split-Path $PSScriptRoot -Parent
     Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase
     [xml]$xaml=Get-Content (Join-Path $PSScriptRoot 'Corpus.Gui.xaml') -Raw -Encoding UTF8
@@ -153,8 +153,19 @@ function Show-CorpusWindow {
         if(-not $row){Show-UiError 'Select a video or transcript result first.';return}
         Start-Work 'Transcript' @{VideoId=$row.VideoId;Query=$(if($isSearch){$state.SearchText}else{''});SegmentId=$(if($isSearch){$row.SegmentId}else{''})}
     }
+    # WPF disables auto-generated columns for PowerShell's dynamic property types.
+    $ui.CorpusGrid.Add_AutoGeneratingColumn({param($sender,$eventArgs) $eventArgs.Column.CanUserSort=$true})
     $ui.OpenTranscript.Add_Click($readTranscript)
-    $ui.CorpusGrid.Add_MouseDoubleClick($readTranscript);$ui.SearchGrid.Add_MouseDoubleClick($readTranscript)
+    $openTranscriptRow={
+        param($sender,$eventArgs)
+        # The grid also receives double-clicks from column headers, scrollbars and empty space.
+        $row=[Windows.Controls.ItemsControl]::ContainerFromElement($sender,$eventArgs.OriginalSource)
+        if($row -isnot [Windows.Controls.DataGridRow]){return}
+        $sender.SelectedItem=$row.Item
+        $eventArgs.Handled=$true
+        & $readTranscript
+    }
+    $ui.CorpusGrid.Add_MouseDoubleClick($openTranscriptRow);$ui.SearchGrid.Add_MouseDoubleClick($openTranscriptRow)
     $ui.OpenResult.Add_Click({try{if($ui.SearchGrid.Visibility -eq 'Visible' -and $ui.SearchGrid.SelectedItem){Start-Process (Assert-CorpusYouTubeUrl $ui.SearchGrid.SelectedItem.TimestampUrl)}elseif($ui.CorpusGrid.SelectedItem){Start-Process (Assert-CorpusYouTubeUrl $ui.CorpusGrid.SelectedItem.VideoUrl)}}catch{Show-UiError $_.Exception.Message}})
     $ui.OpenWorkbook.Add_Click({try{$path=Join-Path $Root 'output/YouTubeCorpus.xlsx';if(-not (Test-Path $path)){throw 'Build the workbook first.'};Start-Process $path}catch{Show-UiError $_.Exception.Message}})
     $ui.OpenLogs.Add_Click({Start-Process explorer.exe -ArgumentList ('"'+(Join-Path $Root 'logs')+'"')})
@@ -166,9 +177,16 @@ function Show-CorpusWindow {
         if($SmokeCorpus -and -not $state.Worker -and $state.Snapshot -and $state.SmokeStage -lt 3){
             try {
                 switch($state.SmokeStage){
-                    0 {$ui.Query.Text='test';$ui.FilterCorpus.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent));$state.SmokeStage=1}
+                    0 {if($SmokeGridCheck){$ui.Tabs.SelectedIndex=3;$window.UpdateLayout();& $SmokeGridCheck $ui.CorpusGrid;if($state.Worker){throw 'A non-row double-click opened a transcript.'}};$ui.Query.Text='test';$ui.FilterCorpus.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent));$state.SmokeStage=1}
                     1 {if($ui.CorpusGrid.Items.Count -ne 1){throw 'Corpus metadata filter failed.'};$ui.Search.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent));$state.SmokeStage=2}
-                    2 {if($ui.SearchGrid.Items.Count -ne 2 -or $ui.SearchGrid.Visibility -ne 'Visible'){throw 'Integrated transcript search failed.'};$ui.SearchGrid.SelectedIndex=0;$ui.OpenTranscript.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent));$state.SmokeStage=3}
+                    2 {if($ui.SearchGrid.Items.Count -ne 2 -or $ui.SearchGrid.Visibility -ne 'Visible'){throw 'Integrated transcript search failed.'};if($SmokeGridCheck){$window.UpdateLayout();& $SmokeGridCheck $ui.SearchGrid;if($state.Worker){throw 'A search header opened a transcript.'}}
+                        $ui.SearchGrid.SelectedIndex=0;$ui.SearchGrid.UpdateLayout()
+                        $row=$ui.SearchGrid.ItemContainerGenerator.ContainerFromIndex(0)
+                        $click=[Windows.Input.MouseButtonEventArgs]::new([Windows.Input.Mouse]::PrimaryDevice,0,[Windows.Input.MouseButton]::Left)
+                        $click.RoutedEvent=[Windows.Controls.Control]::MouseDoubleClickEvent;$click.Source=$row
+                        $ui.SearchGrid.RaiseEvent($click)
+                        if(-not $state.Worker -or $state.Operation -ne 'Transcript'){throw 'Row double-click did not open its transcript.'}
+                        $state.SmokeStage=3}
                 }
             }catch{$state.SmokeError=$_.Exception.Message;$window.Close()}
         }

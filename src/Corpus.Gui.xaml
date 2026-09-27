@@ -3,7 +3,7 @@
 <Style TargetType="Button"><Setter Property="Padding" Value="14,7"/><Setter Property="Margin" Value="4"/><Setter Property="MinHeight" Value="34"/></Style>
 <Style TargetType="TextBox"><Setter Property="Padding" Value="7"/><Setter Property="Margin" Value="4"/><Setter Property="MinHeight" Value="34"/></Style>
 <Style TargetType="ComboBox"><Setter Property="Margin" Value="4"/><Setter Property="MinHeight" Value="34"/><Setter Property="MinWidth" Value="200"/></Style>
-<Style TargetType="DataGrid"><Setter Property="IsReadOnly" Value="True"/><Setter Property="AutoGenerateColumns" Value="True"/><Setter Property="CanUserAddRows" Value="False"/><Setter Property="EnableRowVirtualization" Value="True"/><Setter Property="EnableColumnVirtualization" Value="True"/><Setter Property="AlternatingRowBackground" Value="#F0F4FA"/><Setter Property="GridLinesVisibility" Value="Horizontal"/><Setter Property="SelectionMode" Value="Single"/></Style>
+<Style TargetType="DataGrid"><Setter Property="CanUserSortColumns" Value="True"/><Setter Property="IsReadOnly" Value="True"/><Setter Property="AutoGenerateColumns" Value="True"/><Setter Property="CanUserAddRows" Value="False"/><Setter Property="EnableRowVirtualization" Value="True"/><Setter Property="EnableColumnVirtualization" Value="True"/><Setter Property="AlternatingRowBackground" Value="#F0F4FA"/><Setter Property="GridLinesVisibility" Value="Horizontal"/><Setter Property="SelectionMode" Value="Single"/></Style>
 <Style TargetType="TabItem"><Setter Property="Padding" Value="15,9"/></Style>
 </Window.Resources>
 <DockPanel Margin="16">
