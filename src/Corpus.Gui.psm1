@@ -41,7 +41,7 @@ function Show-CorpusWindow {
         $name=$node.GetAttribute('Name','http://schemas.microsoft.com/winfx/2006/xaml')
         $ui[$name]=$window.FindName($name)
     }
-    foreach($entry in @{OpenTranscript='Transcript';OpenResult='YouTube';OpenWorkbook='Excel';Build='Export';QueueToggle='Play';QueueRemove='Remove';QueueRetry='Retry';QueueClear='Clear';SyncSelected='Retry';SyncAll='Retry';CancelSync='Remove'}.GetEnumerator()){Set-CorpusButtonIcon $ui[$entry.Key] $entry.Value}
+    foreach($entry in @{OpenTranscript='Transcript';OpenResult='YouTube';OpenWorkbook='Excel';Build='Export';QueueToggle='Play';QueueRemove='Remove';QueueRetry='Retry';QueueClear='Broom';QueueClearAll='Clear';SyncSelected='Retry';SyncAll='Retry';CancelSync='Remove'}.GetEnumerator()){Set-CorpusButtonIcon $ui[$entry.Key] $entry.Value}
     $state=@{Worker=$null;Handle=$null;Shared=$null;Operation='';Snapshot=$null;Ready=[bool]$SkipDependencies;Closing=$false;PendingSubject='';SmokeTicks=0;LastOutcome='Ready';CheckedStartup=(([bool]$SkipDependencies -or [bool]$SmokeTest) -and -not $SmokeCheckDependencies);RestartRequired=$false;RestartTicket=$null;DependencyRows=@();SmokeStage=0;ViewerVerified=$false;SmokeError='';QueueWorker=$null;QueueHandle=$null;QueueShared=$null;Queue=[pscustomobject]@{Paused=$true;Items=@();SyncJobs=@()};QueueStamp='';SelectCreatedSubject=$false;RestoringQueue=$false;QueueTicks=0;NeedsRefresh=$false;QueueReader=$null;QueueReadHandle=$null;QueueSnapshot=$null;QueueNext=$null;QueueReadRequested=$true;QueueInitialized=$false;QueueView=[YouTubeCorpus.QueueView]::new();QueueSelectionDirty=$true}
     $ui.QueueGrid.ItemsSource=$state.QueueView.Rows
     $artwork=Join-Path $appRoot 'docs/yt-osint-header-bg.png'
@@ -49,7 +49,7 @@ function Show-CorpusWindow {
         $bitmap=[Windows.Media.Imaging.BitmapImage]::new();$bitmap.BeginInit();$bitmap.CacheOption=[Windows.Media.Imaging.BitmapCacheOption]::OnLoad;$bitmap.UriSource=[uri]$artwork;$bitmap.EndInit();$bitmap.Freeze();$ui.HeaderArtwork.Source=$bitmap
     }
     $state.CleanupTasks=[Collections.Generic.List[Threading.Tasks.Task]]::new()
-    $mutators=@('CreateSubject','RemoveSubject','RenameSubject','AddChannel','RemoveChannel','SyncSelected','SyncAll','Refresh','CancelSync','ImportVideo','Build','Search','FilterCorpus','RefreshChannelTranscripts','RefreshVideoTranscript','OpenTranscript','AutoExport','QueueToggle','QueueRemove','QueueRetry','QueueClear')
+    $mutators=@('CreateSubject','RemoveSubject','RenameSubject','AddChannel','RemoveChannel','SyncSelected','SyncAll','Refresh','CancelSync','ImportVideo','Build','Search','FilterCorpus','RefreshChannelTranscripts','RefreshVideoTranscript','OpenTranscript','AutoExport','QueueToggle','QueueRemove','QueueRetry','QueueClear','QueueClearAll')
     $ui.Paths.Text="Current corpus folder: $Root`nWorkbook: $(Join-Path $Root 'output/YouTubeCorpus.xlsx')`nSource configuration: $(Join-Path $Root 'config.json')`nNative dependencies: $(Get-CorpusNativeRoot)"
     $state.Preferences=Get-CorpusUserSettings $UserSettingsPath
     $state.RestartRoot=$Root
@@ -113,6 +113,7 @@ function Show-CorpusWindow {
         $ui.QueueRetry.IsEnabled=($available -and $ui.QueueGrid.SelectedItems.Count -eq 1 -and $selected -and $selected.Status -in @('Failed','Cancelled'))
         $counts=if($state.QueueSnapshot){$state.QueueSnapshot.Counts}else{[YouTubeCorpus.QueueCounts]::new()}
         $ui.QueueClear.IsEnabled=($available -and $counts.Finished -gt 0)
+        $ui.QueueClearAll.IsEnabled=($available -and ($counts.Pending + $counts.Finished -gt 0 -or @($state.Queue.SyncJobs | Where-Object Status -in @('Pending','Discovering')).Count -gt 0))
         $processing=[bool]$state.QueueWorker -or $counts.Running -gt 0 -or @($state.Queue.SyncJobs | Where-Object Status -eq Discovering).Count -gt 0
         $pausing=$processing -and $state.Queue.Paused
         $running=$processing -or -not $state.Queue.Paused
@@ -201,7 +202,7 @@ function Show-CorpusWindow {
             if($op -eq 'SyncAdd'){foreach($source in $argsMap.Sources){$null=Add-CorpusSyncJob $root $source.Url $source.SubjectId -RefreshTranscript:([bool]$argsMap.RefreshTranscript) -ExportWorkbook:([bool]$argsMap.ExportWorkbook)};return}
             if($op -eq 'SyncCancel'){Stop-CorpusSyncJob $root $argsMap.Id;return}
             if($op -eq 'QueueAdd'){return Add-CorpusQueueUrls $root $argsMap.Text $argsMap.SubjectId -RefreshTranscript:([bool]$argsMap.RefreshTranscript) -ExportWorkbook:([bool]$argsMap.ExportWorkbook)}
-            if($op -eq 'QueueAction'){Update-CorpusQueue $root $argsMap.Action $argsMap.Id;return}
+            if($op -eq 'QueueAction'){Update-CorpusQueue $root $argsMap.Action $argsMap.Id -RunnerShared $argsMap['RunnerShared'];return}
             if($op -eq 'Transcript') {
                 if($argsMap.VideoId -notmatch '^[A-Za-z0-9_-]{11}$'){throw 'Invalid video ID.'}
                 $video=Read-CorpusJson (Join-Path $root "data/normalized/videos/$($argsMap.VideoId).json")
@@ -355,6 +356,7 @@ function Show-CorpusWindow {
     })
     $ui.QueueRetry.Add_Click({if($ui.QueueGrid.SelectedItem){Start-Work 'QueueAction' @{Action='Retry';Id=$ui.QueueGrid.SelectedItem.Id}}})
     $ui.QueueClear.Add_Click({Start-Work 'QueueAction' @{Action='ClearFinished';Id=''}})
+    $ui.QueueClearAll.Add_Click({Start-Work 'QueueAction' @{Action='ClearQueue';Id='';RunnerShared=$state.QueueShared}})
     $ui.Build.Add_Click({Start-Work 'Build'})
     function Get-CorpusFilters {
         $s=$ui.SearchSubject.SelectedItem

@@ -1,6 +1,6 @@
 ﻿Set-StrictMode -Version 2
 function Set-CorpusButtonIcon {
-    param($Button,[ValidateSet('YouTube','Excel','Transcript','Export','Play','Pause','Clear','Remove','Retry')][string]$Icon,[string]$Label='')
+    param($Button,[ValidateSet('YouTube','Excel','Transcript','Export','Play','Pause','Clear','Broom','Remove','Retry')][string]$Icon,[string]$Label='')
     Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase
     if(-not (Get-Variable IconResources -Scope Script -ErrorAction SilentlyContinue)){
         [xml]$xaml=Get-Content (Join-Path $PSScriptRoot 'Corpus.Icons.xaml') -Raw -Encoding UTF8

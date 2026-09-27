@@ -125,16 +125,18 @@ function script:Invoke-CorpusOperation {
             4 {
                 if(-not (Test-Path (Join-Path $root active.txt))){return}
                 if(-not $state.QueueWorker){throw 'Fixture download is not active'}
-                Click $ui.QueueToggle;$test.Stage=5
-                $test.Probe.Phase='Pause download'
+                Click $ui.QueueClearAll;$test.Stage=5
+                $test.Probe.Phase='Clear queue during download'
             }
             5 {
                 if(-not $state.Queue.Paused){return}
+                if($ui.QueueGrid.Items.Count -ne 1 -or $ui.QueueGrid.Items[0].Status -ne 'Running' -or -not $state.QueueWorker){throw 'Clear queue did not retain exactly the uninterrupted active download'}
+                if($ui.QueueClearAll.IsEnabled){throw 'Clear queue should disable when only the active download remains'}
                 [IO.File]::WriteAllText((Join-Path $root release.txt),'go');$test.Stage=6
             }
             6 {
                 if($state.QueueWorker){return}
-                if($state.QueueSnapshot.Counts.Finished -ne 1 -or -not $state.Queue.Paused){throw 'Pause did not stop after one active download'}
+                if($state.QueueSnapshot.Counts.Finished -ne 1 -or $ui.QueueGrid.Items.Count -ne 1 -or $ui.QueueGrid.Items[0].Status -ne 'Completed' -or -not $state.Queue.Paused){throw 'Clear queue did not let exactly one active download finish'}
                 $test.Probe.Dispose()
                 $test.Report=[pscustomobject]@{Rows=$size;BatchRemoved=$test.RemovedCount;Samples=$test.Probe.Samples;InputEdits=$test.Probe.Edits;Scrolls=$test.Probe.Scrolls;P95DelayMs=[math]::Round($test.Probe.Percentile(.95),1);MaxDelayMs=[math]::Round($test.Probe.Percentile(1),1);WorstPhase=$test.Probe.WorstPhase;SortMs=[math]::Round($test.SortMs,1);MaxApplySliceMs=[math]::Round($state.QueueView.MaxSliceMilliseconds,1)}
                 if($test.Probe.Samples -lt 50 -or $test.Probe.Edits -lt 5){throw 'UI probe did not run during queue operations'}
@@ -150,4 +152,4 @@ function script:Invoke-CorpusOperation {
     $reports+=$test.Report;$test.Report | Format-List
 }
 $reports | ConvertTo-Json | Set-Content (Join-Path $project work/queue-performance-results.json) -Encoding UTF8
-'Large-queue WPF integration passed: asynchronous load, virtualized scrolling, edits, sorting, stable selection, one-row update, clear, removal, active download and pause.'
+'Large-queue WPF integration passed: asynchronous load, virtualized scrolling, edits, sorting, stable selection, one-row update, history cleanup, removal and clearing thousands of queued videos while the current download finishes.'

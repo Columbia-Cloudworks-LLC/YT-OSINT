@@ -116,23 +116,35 @@ function Remove-CorpusQueueItems {
     } finally {$lock.Dispose()}
 }
 function Update-CorpusQueue {
-    param([string]$Root,[ValidateSet('Pause','Remove','Retry','ClearFinished')][string]$Action,[string]$Id='')
+    param([string]$Root,[ValidateSet('Pause','Remove','Retry','ClearFinished','ClearQueue')][string]$Action,[string]$Id='',$RunnerShared=$null)
     $lock=Enter-CorpusConfigLock $Root
     try {
         $queue=Get-CorpusQueue $Root
         if($Action -eq 'Pause'){$queue.Paused=$true}
-        elseif($Action -eq 'ClearFinished'){
+        elseif($Action -in @('ClearFinished','ClearQueue')){
+            $clearQueue=$Action -eq 'ClearQueue'
+            if($clearQueue){
+                $queue.Paused=$true;$queue.AwaitingReview=$false;$queue.DiscoveryJobIds=@()
+                # Change discovery state under the same lock as row removal, so late
+                # listings cannot append videos through Add-CorpusQueueUrls.
+                foreach($job in $queue.SyncJobs){
+                    if($job.Status -in @('Pending','Discovering')){$job.Status='Cancelling';$job.Detail='Queue cleared'}
+                }
+            }
             $jobsById=@{};foreach($job in $queue.SyncJobs){$jobsById[$job.Id]=$job}
             foreach($item in $queue.Items){
-                if($item.Status -in @('Pending','Running')){continue}
+                if($item.Status -eq 'Running' -or ($item.Status -eq 'Pending' -and -not $clearQueue)){continue}
+                $wasPending=$item.Status -eq 'Pending'
+                $outcome=if($wasPending){'Cancelled'}else{$item.Status}
                 foreach($jobId in $item.JobIds){
                     if($jobsById.ContainsKey($jobId)){
-                        $counts=$jobsById[$jobId].ClearedResults
-                        if($counts.PSObject.Properties[$item.Status]){$counts.($item.Status)++}
+                        $job=$jobsById[$jobId];$counts=$job.ClearedResults
+                        if($wasPending){$job | Add-Member NoteProperty PartialImport $true -Force}
+                        if($counts.PSObject.Properties[$outcome]){$counts.($outcome)++}
                     }
                 }
             }
-            $queue.Items=@($queue.Items | Where-Object Status -in @('Pending','Running'))
+            $queue.Items=@($queue.Items | Where-Object {$_.Status -eq 'Running' -or (-not $clearQueue -and $_.Status -eq 'Pending')})
         }
         else {
             $matches=@($queue.Items | Where-Object Id -eq $Id)
@@ -153,6 +165,7 @@ function Update-CorpusQueue {
             }
         }
         Save-CorpusQueue $Root $queue
+        if($Action -eq 'ClearQueue' -and $RunnerShared){$RunnerShared.CancelDiscovery=$true}
     } finally {$lock.Dispose()}
 }
 function Invoke-CorpusQueue {
@@ -245,8 +258,8 @@ function Update-CorpusSyncStates {
                 $channel.Status=$job.Status;if($job.Status -eq 'Completed'){$channel.LastSync=$job.FinishedAt}
                 Write-CorpusJson $path $channel
             }
-            Write-CorpusJson (Join-Path $Root "data/normalized/channel-attempts/$(Get-CorpusId $job.Url).json") ([ordered]@{Url=$job.Url;LastAttempt=$job.AddedAt;Status=$job.Status})
         }
+        Write-CorpusJson (Join-Path $Root "data/normalized/channel-attempts/$(Get-CorpusId $job.Url).json") ([ordered]@{Url=$job.Url;LastAttempt=$job.AddedAt;Status=$job.Status})
     }
 }
 function Add-CorpusSyncJob {
@@ -308,6 +321,9 @@ function Invoke-CorpusQueuedDiscovery {
         $queue=Get-CorpusQueue $Root;$saved=@($queue.SyncJobs | Where-Object Id -eq $Job.Id)[0]
         if($saved.Status -eq 'Discovering'){$saved.Status=$status;$saved.Detail=$detail;if($status -in @('Cancelled','Failed')){$saved.FinishedAt=[datetime]::UtcNow.ToString('o')}}
         if($channelId){$saved.ChannelId=$channelId}
+        # Discovery can finish after cancellation/clearing and write a Queued channel
+        # record. Finalize its cancelled outcome again, now with the resolved ID.
+        if($saved.Status -eq 'Cancelled'){$saved.Status='Cancelling'}
         if($pause){$queue.Paused=$true};Save-CorpusQueue $Root $queue
     } finally {$lock.Dispose()}
 }

@@ -43,6 +43,10 @@ $check={
             if((Label) -ne 'Start' -or $ui.ContainsKey('QueuePause') -or $ui.ContainsKey('QueueCancel')){throw 'Expected one Start/Pause control'}
             if([Windows.Controls.Grid]::GetColumn($ui.QueueToggle) -ne 1){throw 'Queue control is not on the footer right'}
             if($ui.QueueToggle.Content.Children[0] -isnot [Windows.Controls.Image] -or $ui.QueueClear.Content.Children[0] -isnot [Windows.Controls.Image]){throw 'Queue action icons are missing'}
+            if($ui.QueueClear.Content.Children[0].Source.Drawing -isnot [Windows.Media.DrawingGroup]){throw 'History cleanup must use the broom icon'}
+            if($ui.QueueClearAll.Content.Children[0].Source.Drawing.Pen.Brush.Color.ToString() -ne '#FFC52A35'){throw 'Clear queue must use the red X'}
+            $actions=$ui.QueueClear.Parent.Children
+            if($actions.IndexOf($ui.QueueClearAll) -ne $actions.IndexOf($ui.QueueClear)+1){throw 'Clear queue must be beside Clear finished'}
             Click $ui.QueueToggle;$state.DiscoveryTestStage=1
         }
         1 {
@@ -116,3 +120,36 @@ $check={
 }
 Show-CorpusWindow $root -SkipDependencies -SmokeTest -SmokeQueueCheck $check -SmokeQueueAdapter $adapter
 'Discovery queue GUI: discovery barrier, two-phase progress, Start/Pause/Pausing, colored badges, clear all terminal states and preserved sync outcomes passed.'
+
+# A second isolated window clears while enumeration is blocked in the local adapter.
+$root=Join-Path $project ('work/clear-discovery-'+[guid]::NewGuid().ToString('N'))
+$null=New-CorpusContext $root
+Copy-Item (Join-Path $PSScriptRoot fixtures/config.json) (Join-Path $root config.json)
+$null=Add-CorpusQueueUrls $root 'https://youtu.be/abcDEF12_-3' mo
+$null=Add-CorpusSyncJob $root 'https://www.youtube.com/@atmoio' mo
+$null=Add-CorpusSyncJob $root 'https://www.youtube.com/@lessbitter' mo
+$clearCheck={
+    param($window,$ui,$state)
+    if(-not $state.ContainsKey('ClearDiscoveryStage')){$state.ClearDiscoveryStage=0;$state.ClearDeadline=[datetime]::UtcNow.AddSeconds(45)}
+    if([datetime]::UtcNow -gt $state.ClearDeadline){throw "Clear discovery timed out: $($ui.LogText.Text)"}
+    if($state.Worker){return}
+    function Click($button){if(-not $button.IsEnabled){throw "$($button.Name) is disabled"};$button.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))}
+    switch($state.ClearDiscoveryStage){
+        0 {$ui.QueueTab.IsSelected=$true;Click $ui.QueueToggle;$state.ClearDiscoveryStage=1}
+        1 {
+            if(-not (Test-Path (Join-Path $root discovering.txt))){return}
+            Click $ui.QueueClearAll;$state.ClearDiscoveryStage=2
+        }
+        2 {
+            if($state.QueueWorker){return}
+            if($ui.QueueGrid.Items.Count -or -not $state.Queue.Paused -or $ui.QueueToggle.IsEnabled -or $ui.QueueClearAll.IsEnabled){throw 'Clear queue left visible or startable work'}
+            if(@($state.Queue.SyncJobs | Where-Object Status -ne Cancelled).Count){throw 'Clear queue left a channel discovery scheduled'}
+            if(Test-Path (Join-Path $root started.txt)){throw 'Clear queue allowed a video download'}
+            $window.Close()
+        }
+    }
+}
+Show-CorpusWindow $root -SkipDependencies -SmokeTest -SmokeQueueCheck $clearCheck -SmokeQueueAdapter $adapter -UserSettingsPath (Join-Path $root fixture-settings.json)
+$q=Initialize-CorpusQueue $root
+if($q.Items.Count -or -not $q.Paused -or @($q.SyncJobs | Where-Object Status -ne Cancelled).Count){throw 'Restart restored cleared work'}
+'Clear queue GUI: active discovery cancelled, remaining channel jobs cancelled, no downloads or refilled rows, and empty paused recovery passed.'

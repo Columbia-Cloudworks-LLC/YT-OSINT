@@ -178,6 +178,23 @@ Describe 'Universal channel and batch scheduler' {
         $q.Items[0].SubjectId | Should Be mo;$q.Items[0].ListingEntry.title | Should Be 'Discovered video'
         Assert-MockCalled Invoke-CorpusOperation -ModuleName Corpus.Queue -Times 1 -Exactly -Scope It
     }
+    It 'clears during a download without interrupting it or starting another video' {
+        $null=Add-CorpusSyncJob $root $url mo
+        $null=Add-CorpusQueueUrls $root "https://youtu.be/abcDEF12_-3`nhttps://youtu.be/xyzDEF12_-3" mo
+        Mock Invoke-CorpusOperation -ModuleName Corpus.Queue {
+            $null=Add-CorpusSyncJob $Root 'https://www.youtube.com/@lessbitter' mo
+            Update-CorpusQueue $Root ClearQueue -RunnerShared $Shared
+            $q=Get-CorpusQueue $Root
+            if($q.Items.Count -ne 1 -or $q.Items[0].Status -ne 'Running' -or -not $q.Paused){throw 'Clear did not preserve exactly the active download'}
+            Test-CorpusCancellation (New-CorpusContext $Root $Shared)
+            [pscustomobject]@{MembersOnlySkipped=0;TranscriptsUnavailable=0;FinalState='Success'}
+        }
+        Invoke-CorpusQueue $root $shared
+        $q=Get-CorpusQueue $root;$q.Items.Count | Should Be 1;$q.Items[0].Status | Should Be Completed;$q.Paused | Should Be $true
+        $q.SyncJobs[1].Status | Should Be Cancelled
+        Assert-MockCalled Invoke-CorpusOperation -ModuleName Corpus.Queue -Times 1 -Exactly -Scope It
+        Assert-MockCalled Sync-CorpusChannel -ModuleName Corpus.Queue -Times 1 -Exactly -Scope It
+    }
     It 'lists all channels and enriches shared batch dates before review then resumes without another review pause' {
         $null=Add-CorpusQueueUrls $root 'https://youtu.be/abcDEF12_-3' mo
         $null=Add-CorpusSyncJob $root $url mo
@@ -334,6 +351,20 @@ Describe 'Channel discovery without inline downloads' {
         $channel.ChannelName | Should Be 'Discovered name';$channel.Status | Should Be Queued
         Assert-MockCalled Import-CorpusVideo -ModuleName Corpus.YouTube -Times 0 -Exactly -Scope It
     }
+    It 'discards a listing arriving after Clear queue and finalizes the late channel record as cancelled' {
+        Mock Invoke-CorpusYouTubeProcess -ModuleName Corpus.YouTube {
+            Update-CorpusQueue $Context.Root ClearQueue
+            [pscustomobject]@{ExitCode=0;StdErr='';StdOut='{"id":"UC1234567890123456789012","channel":"Late channel","entries":[{"id":"abcDEF12_-3"}]}'}
+        }
+        $null=Add-CorpusSyncJob $root 'https://www.youtube.com/@atmoio' mo
+        $null=Add-CorpusSyncJob $root 'https://www.youtube.com/@lessbitter' mo
+        Invoke-CorpusQueue $root
+        $q=Get-CorpusQueue $root;$q.Items.Count | Should Be 0;$q.Paused | Should Be $true
+        @($q.SyncJobs | Where-Object Status -ne Cancelled).Count | Should Be 0
+        (Read-CorpusJson (Join-Path $root data/normalized/channels/UC1234567890123456789012.json)).Status | Should Be Cancelled
+        Assert-MockCalled Invoke-CorpusYouTubeProcess -ModuleName Corpus.YouTube -Times 1 -Exactly -Scope It
+        Assert-MockCalled Import-CorpusVideo -ModuleName Corpus.YouTube -Times 0 -Exactly -Scope It
+    }
 }
 
 Describe 'Atomic multi-item removal' {
@@ -378,6 +409,30 @@ Describe 'Clear finished history without losing sync results' {
         foreach($job in $q.SyncJobs){$job.ClearedResults.Completed | Should Be 1;$job.ClearedResults.Skipped | Should Be 1;$job.ClearedResults.Failed | Should Be 1;$job.ClearedResults.Cancelled | Should Be 1}
         Update-CorpusQueue $root ClearFinished
         (Get-CorpusQueue $root).SyncJobs[0].ClearedResults.Failed | Should Be 1
+    }
+    It 'clears all but Running atomically and preserves shared partial accounting after completion and restart' {
+        $shared=[hashtable]::Synchronized(@{Cancel=$false;ActiveSyncId='';CancelDiscovery=$false})
+        $q=Get-CorpusQueue $root;$q.Paused=$false;$q.AwaitingReview=$true;Write-CorpusJson (Join-Path $root data/queue.json) $q
+        Update-CorpusQueue $root ClearQueue -RunnerShared $shared
+        $q=Get-CorpusQueue $root;$q.Items.Count | Should Be 1;$q.Items[0].Status | Should Be Running
+        $q.Paused | Should Be $true;$q.AwaitingReview | Should Be $false;$shared.Cancel | Should Be $false;$shared.CancelDiscovery | Should Be $true
+        foreach($job in $q.SyncJobs){$job.PartialImport | Should Be $true;$job.ClearedResults.Cancelled | Should Be 2;$job.ClearedResults.Failed | Should Be 1}
+        Update-CorpusQueue $root ClearQueue
+        (Get-CorpusQueue $root).SyncJobs[0].ClearedResults.Cancelled | Should Be 2
+        $q.Items[0].Status='Completed';Write-CorpusJson (Join-Path $root data/queue.json) $q
+        Update-CorpusQueue $root ClearFinished
+        $q=Initialize-CorpusQueue $root;$q.Items.Count | Should Be 0
+        foreach($job in $q.SyncJobs){$job.Status | Should Be Partial;$job.Detail | Should Match '6 videos; 1 failed; 2 cancelled';(Read-CorpusJson (Join-Path $root "data/normalized/channels/$($job.Id).json")).LastSync | Should Be '2026-09-01T00:00:00Z'}
+    }
+    It 'signals only discovery cancellation and also clears a paused queue with no active item' {
+        $shared=[hashtable]::Synchronized(@{Cancel=$false;ActiveSyncId='discovery'})
+        $q=Get-CorpusQueue $root;$q.Items=@($q.Items | Where-Object Status -ne Running);Write-CorpusJson (Join-Path $root data/queue.json) $q
+        Update-CorpusQueue $root ClearQueue -RunnerShared $shared
+        (Get-CorpusQueue $root).Items.Count | Should Be 0
+        $ctx=New-CorpusContext $root $shared
+        {Test-CorpusCancellation $ctx} | Should Throw
+        $shared.ActiveSyncId='';Test-CorpusCancellation $ctx
+        @((Get-CorpusQueue $root).SyncJobs | Where-Object Status -ne Partial).Count | Should Be 0
     }
     It 'retains partial outcome and failure totals after reload and later completion' {
         Update-CorpusQueue $root ClearFinished

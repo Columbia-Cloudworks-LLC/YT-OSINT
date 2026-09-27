@@ -45,11 +45,11 @@
 <CheckBox x:Name="QueueReview" Content="Pause after channel discovery for review" IsChecked="True" Margin="8,4" ToolTip="Applied when Start is pressed. Discover all queued channels, then pause before downloading. Press Start again after reviewing."/>
 <WrapPanel><TextBlock Text="Est. publish date before" VerticalAlignment="Center" Margin="8,4"/><DatePicker x:Name="QueueBefore" Width="145" Margin="4"/><Button x:Name="QueueSelectBefore" Content="Select pending before date" ToolTip="Replace the selection with pending videos strictly before this date across all channels. Unknown dates stay unselected."/></WrapPanel>
 <TextBlock Text="Dates may be approximate. Unknown dates stay unselected; capture updates dates when available." Foreground="#52657A" Margin="8,4" TextWrapping="Wrap"/>
-<WrapPanel><Button x:Name="QueueRemove" Content="Remove selected pending items"/><Button x:Name="QueueRetry" Content="Retry selected"/><Button x:Name="QueueClear" Content="Clear finished" ToolTip="Clear completed, skipped, cancelled and failed rows. Pending/running work and captured files are preserved."/></WrapPanel>
+<WrapPanel><Button x:Name="QueueRemove" Content="Remove selected pending items"/><Button x:Name="QueueRetry" Content="Retry selected"/><Button x:Name="QueueClear" Content="Clear finished" ToolTip="Clean up completed, skipped, cancelled and failed rows. Pending/running work and captured files are preserved."/><Button x:Name="QueueClearAll" Content="Clear queue" ToolTip="Remove all queue rows except the current download, cancel channel discovery, and pause the queue. The current download may finish; captured files are preserved."/></WrapPanel>
 <TextBlock x:Name="QueueSelection" Margin="8,4"/>
 </StackPanel>
 <Grid DockPanel.Dock="Bottom" Margin="4,10,4,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-<TextBlock Text="Clear finished removes history only. Pause finishes the active item safely. Saved queues reopen paused." TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,20,0"/>
+<TextBlock Text="Shift-click selects a range. Clear queue keeps only the current download. Clear finished cleans up history." TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,20,0"/>
 <Button x:Name="QueueToggle" Grid.Column="1" Content="Start" MinWidth="120" ToolTip="Start the entire queue. Queued channels are listed before video downloads."/>
 </Grid>
 <q:QueueGrid x:Name="QueueGrid" Style="{StaticResource {x:Type DataGrid}}" SelectionMode="Extended" SelectionUnit="FullRow" AutoGenerateColumns="False" Margin="4" RowHeight="36" ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"><DataGrid.Columns>

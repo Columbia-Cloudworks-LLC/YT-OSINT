@@ -14,6 +14,7 @@ function Set-CorpusProgress {
 }
 function Test-CorpusCancellation {
     param($Context)
+    if($Context.Shared -and $Context.Shared.ContainsKey('ActiveSyncId') -and $Context.Shared.ActiveSyncId -and $Context.Shared.ContainsKey('CancelDiscovery') -and $Context.Shared.CancelDiscovery){throw [OperationCanceledException]::new('Queue cleared; channel discovery cancelled.')}
     if($Context.Shared -and $Context.Shared.ContainsKey('ActiveSyncId') -and $Context.Shared.ActiveSyncId -and $Context.Shared.ContainsKey('CancelSyncId') -and $Context.Shared.ActiveSyncId -eq $Context.Shared.CancelSyncId){throw [OperationCanceledException]::new('Channel discovery cancelled.')}
     if ($Context.Shared -and $Context.Shared.Cancel) { throw [OperationCanceledException]::new('Operation cancelled; completed items have been preserved.') }
 }
