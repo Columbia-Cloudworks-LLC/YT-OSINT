@@ -27,7 +27,7 @@ Describe 'Members-only identification' {
 Describe 'Members-only skip persistence and accounting' {
     BeforeEach {
         $ctx=New-CorpusContext (Join-Path $TestDrive ([guid]::NewGuid().ToString('N')))
-        Copy-Item (Join-Path $project config.json) (Join-Path $ctx.Root config.json)
+        Copy-Item (Join-Path $PSScriptRoot fixtures/config.json) (Join-Path $ctx.Root config.json)
         $run=[pscustomobject]@{VideosDiscovered=0;VideosAdded=0;VideosAlreadyKnown=0;Failures=0;MembersOnlySkipped=0}
     }
     It 'skips entries identified by the listing without requesting those videos' {

@@ -15,7 +15,12 @@ function Write-CorpusJson {
 }
 function Read-CorpusJson {
     param([string]$Path, $Default=$null)
-    if (Test-Path -LiteralPath $Path) { $data=Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json; return $data }
+    if (Test-Path -LiteralPath $Path) {
+        # Hold a consistent file snapshot without blocking another worker's atomic replacement.
+        $stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete))
+        $reader=[IO.StreamReader]::new($stream,[Text.Encoding]::UTF8)
+        try{return ($reader.ReadToEnd() | ConvertFrom-Json)}finally{$reader.Dispose()}
+    }
     return $Default
 }
 function Get-CorpusId {
@@ -41,9 +46,26 @@ function Get-CorpusConfig {
     }
     return $config
 }
+function Enter-CorpusConfigLock {
+    param([string]$Root)
+    $null=[IO.Directory]::CreateDirectory((Join-Path $Root 'data'))
+    $deadline=[datetime]::UtcNow.AddSeconds(5)
+    while($true){
+        try{return [IO.File]::Open((Join-Path $Root 'data/config.lock'),[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)}
+        catch [IO.IOException]{if([datetime]::UtcNow -ge $deadline){throw 'Configuration is busy. Try again shortly.'};Start-Sleep -Milliseconds 25}
+    }
+}
+function Test-CorpusSubjectQueued {
+    param([string]$Root,[string]$SubjectId)
+    if(-not $SubjectId){return $false}
+    $queue=Read-CorpusJson (Join-Path $Root 'data/queue.json')
+    return ($queue -and @($queue.Items | Where-Object {$_.SubjectId -eq $SubjectId -and $_.Status -in @('Pending','Running')}).Count -gt 0)
+}
 function Set-CorpusSubject {
     param([string]$Root,[string]$Name,[string]$Id='')
     if ([string]::IsNullOrWhiteSpace($Name)) { throw 'Enter a subject name.' }
+    $configLock=Enter-CorpusConfigLock $Root
+    try {
     $c=Get-CorpusConfig $Root
     if (-not $Id) {
         $existing=@($c.subjects | Where-Object { $_.name -eq $Name.Trim() })
@@ -51,15 +73,19 @@ function Set-CorpusSubject {
         $Id=[guid]::NewGuid().ToString('N')
         $c.subjects=@($c.subjects)+[pscustomobject]@{id=$Id;name=$Name.Trim();channels=@()}
     } else {
+        if(Test-CorpusSubjectQueued $Root $Id){throw 'This subject has pending or active queue items. Finish or remove them before renaming.'}
         $s=@($c.subjects | Where-Object id -eq $Id)
         if(-not $s.Count) { throw 'Subject no longer exists.' }; $s[0].name=$Name.Trim()
     }
     Write-CorpusJson (Join-Path $Root 'config.json') $c
     return $Id
+    } finally {$configLock.Dispose()}
 }
 function Set-CorpusChannelAssociation {
     param([string]$Root,[string]$SubjectId,[string]$Url,[switch]$Remove)
     $url=Assert-CorpusYouTubeUrl $Url
+    $configLock=Enter-CorpusConfigLock $Root
+    try {
     $c=Get-CorpusConfig $Root
     $s=@($c.subjects | Where-Object id -eq $SubjectId)
     if(-not $s.Count) { throw 'Select a subject first.' }
@@ -69,6 +95,7 @@ function Set-CorpusChannelAssociation {
         if(-not @($s[0].channels | Where-Object url -eq $url).Count) { $s[0].channels=@($s[0].channels)+[pscustomobject]@{url=$url} }
     }
     Write-CorpusJson (Join-Path $Root 'config.json') $c
+    } finally {$configLock.Dispose()}
 }
 function New-CorpusContext {
     param([string]$Root,$Shared=$null)

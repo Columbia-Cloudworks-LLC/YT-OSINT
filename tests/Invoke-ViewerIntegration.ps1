@@ -29,7 +29,7 @@ Show-CorpusTranscriptWindow -Video $video -Rows $longRows -SmokeTest
 foreach($name in @('Logging','Process','Dependencies','RateLimit','Transcript','YouTube','Excel','Operations','Gui')){Import-Module (Join-Path $root "src/Corpus.$name.psm1") -Force -Global}
 $fixtureRoot=Join-Path $root ('work/viewer-integration-'+[guid]::NewGuid().ToString('N'))
 $ctx=New-CorpusContext $fixtureRoot
-Copy-Item (Join-Path $root config.json) (Join-Path $fixtureRoot config.json)
+Copy-Item (Join-Path $PSScriptRoot fixtures/config.json) (Join-Path $fixtureRoot config.json)
 $video=ConvertTo-CorpusVideo ([pscustomobject]@{id='abcdefghijk';title='Test transcript';channel='Local fixture';duration=9}) mo Mo
 $video.TranscriptPath='data/normalized/transcripts/abcdefghijk.json';$video.TranscriptAvailable=$true
 Save-CorpusVideo $ctx $video

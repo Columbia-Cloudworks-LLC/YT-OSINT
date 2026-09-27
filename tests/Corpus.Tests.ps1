@@ -5,7 +5,7 @@ $vtt=Join-Path $PSScriptRoot 'fixtures/rolling.en.vtt'
 Describe 'Configuration and stable identities' {
     BeforeEach {
         $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item $root -ItemType Directory | Out-Null
-        Copy-Item (Join-Path $project 'config.json') (Join-Path $root 'config.json')
+        Copy-Item (Join-Path $PSScriptRoot 'fixtures/config.json') (Join-Path $root 'config.json')
         $ctx=New-CorpusContext $root
     }
     It 'loads seeded subject and two explicitly associated channels' {
@@ -84,7 +84,7 @@ Describe 'Transcript normalization' {
 Describe 'Persistence, repeat imports and failures' {
     BeforeEach {
         $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item $root -ItemType Directory | Out-Null
-        Copy-Item (Join-Path $project config.json) (Join-Path $root config.json)
+        Copy-Item (Join-Path $PSScriptRoot fixtures/config.json) (Join-Path $root config.json)
         $ctx=New-CorpusContext $root;$video=ConvertTo-CorpusVideo $fixture mo Mo
     }
     It 'upserts videos without duplicate rows and preserves metadata artifacts by content' {
@@ -129,7 +129,7 @@ Describe 'Native process wrapper' {
 Describe 'Excel fixture export' {
     BeforeEach {
         $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item $root -ItemType Directory | Out-Null
-        Copy-Item (Join-Path $project config.json) (Join-Path $root config.json)
+        Copy-Item (Join-Path $PSScriptRoot fixtures/config.json) (Join-Path $root config.json)
         $ctx=New-CorpusContext $root;$video=ConvertTo-CorpusVideo $fixture mo Mo
         $video.TranscriptPath='data/normalized/transcript.json';$video.TranscriptAvailable=$true
         Write-CorpusJson (Join-Path $root $video.TranscriptPath) @(ConvertFrom-CorpusVtt $vtt $video Automatic)
@@ -167,7 +167,7 @@ Describe 'Excel fixture export' {
 Describe 'Fixture acquisition workflow through the YouTube adapter' {
     BeforeEach {
         $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item $root -ItemType Directory | Out-Null
-        Copy-Item (Join-Path $project config.json) (Join-Path $root config.json)
+        Copy-Item (Join-Path $PSScriptRoot fixtures/config.json) (Join-Path $root config.json)
         Copy-Item (Join-Path $PSScriptRoot 'fixtures/video.info.json') (Join-Path $root fixture.info.json)
         Copy-Item $vtt (Join-Path $root fixture.vtt)
         $ctx=New-CorpusContext $root
@@ -226,7 +226,7 @@ Describe 'Fixture acquisition workflow through the YouTube adapter' {
 Describe 'Run accounting and cancellation' {
     BeforeEach {
         $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));New-Item $root -ItemType Directory | Out-Null
-        Copy-Item (Join-Path $project config.json) (Join-Path $root config.json)
+        Copy-Item (Join-Path $PSScriptRoot fixtures/config.json) (Join-Path $root config.json)
         $ctx=New-CorpusContext $root
         Mock Invoke-CorpusProcess -ModuleName Corpus.Operations { [pscustomobject]@{ExitCode=0;StdOut='fixture 1.0';StdErr=''} }
     }
@@ -249,7 +249,7 @@ Describe 'Optional workbook exports' {
     BeforeEach {
         $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
         $ctx=New-CorpusContext $root
-        Copy-Item (Join-Path $project config.json) (Join-Path $root config.json)
+        Copy-Item (Join-Path $PSScriptRoot fixtures/config.json) (Join-Path $root config.json)
         Mock Invoke-CorpusProcess -ModuleName Corpus.Operations {[pscustomobject]@{ExitCode=0;StdOut='fixture';StdErr=''}}
         Mock Import-CorpusVideo -ModuleName Corpus.Operations {}
         Mock Export-CorpusWorkbook -ModuleName Corpus.Operations {}

@@ -100,7 +100,7 @@ Describe 'Persistent YouTube request scheduling' {
 Describe 'Rate limit stops the entire queue' {
     BeforeEach {
         $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));$ctx=New-CorpusContext $root
-        Copy-Item (Join-Path $project config.json) (Join-Path $root config.json)
+        Copy-Item (Join-Path $PSScriptRoot fixtures/config.json) (Join-Path $root config.json)
     }
     It 'does not schedule a second channel and records RateLimited instead of Failed' {
         Mock Invoke-CorpusProcess -ModuleName Corpus.Operations {[pscustomobject]@{ExitCode=0;StdOut='fixture';StdErr=''}}

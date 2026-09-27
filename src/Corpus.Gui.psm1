@@ -1,5 +1,6 @@
 ﻿Set-StrictMode -Version 2
 Import-Module (Join-Path $PSScriptRoot 'Corpus.Viewer.psm1') -Force -Global
+Import-Module (Join-Path $PSScriptRoot 'Corpus.Queue.psm1') -Force -Global
 function Start-CorpusRestart {
     param([string]$Root,[switch]$SmokeTest)
     $signal=Join-Path $Root ('logs/restart-'+[guid]::NewGuid().ToString('N')+'.ready')
@@ -12,7 +13,7 @@ function Start-CorpusRestart {
     return [pscustomobject]@{Process=$process;SignalPath=$signal}
 }
 function Show-CorpusWindow {
-    param([string]$Root,[switch]$SkipDependencies,[switch]$SmokeTest,[string]$ScreenshotPath='',[switch]$SmokeCheckDependencies,[switch]$OpenDependencies,[switch]$SmokeCorpus,[scriptblock]$SmokeGridCheck)
+    param([string]$Root,[switch]$SkipDependencies,[switch]$SmokeTest,[string]$ScreenshotPath='',[switch]$SmokeCheckDependencies,[switch]$OpenDependencies,[switch]$SmokeCorpus,[scriptblock]$SmokeGridCheck,[scriptblock]$SmokeQueueCheck,[string]$SmokeQueueAdapter='')
     $appRoot=Split-Path $PSScriptRoot -Parent
     Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase
     [xml]$xaml=Get-Content (Join-Path $PSScriptRoot 'Corpus.Gui.xaml') -Raw -Encoding UTF8
@@ -24,16 +25,46 @@ function Show-CorpusWindow {
         $name=$node.GetAttribute('Name','http://schemas.microsoft.com/winfx/2006/xaml')
         $ui[$name]=$window.FindName($name)
     }
-    $state=@{Worker=$null;Handle=$null;Shared=$null;Operation='';Snapshot=$null;Ready=[bool]$SkipDependencies;Closing=$false;PendingSubject='';SmokeTicks=0;LastOutcome='Ready';CheckedStartup=(([bool]$SkipDependencies -or [bool]$SmokeTest) -and -not $SmokeCheckDependencies);RestartRequired=$false;RestartTicket=$null;DependencyRows=@();SmokeStage=0;ViewerVerified=$false;SmokeError=''}
-    $mutators=@('CreateSubject','RenameSubject','AddChannel','RemoveChannel','SyncSelected','SyncAll','Refresh','CreateVideoSubject','ImportVideo','Build','Search','FilterCorpus','RefreshChannelTranscripts','RefreshVideoTranscript','OpenTranscript','AutoExport')
+    $state=@{Worker=$null;Handle=$null;Shared=$null;Operation='';Snapshot=$null;Ready=[bool]$SkipDependencies;Closing=$false;PendingSubject='';SmokeTicks=0;LastOutcome='Ready';CheckedStartup=(([bool]$SkipDependencies -or [bool]$SmokeTest) -and -not $SmokeCheckDependencies);RestartRequired=$false;RestartTicket=$null;DependencyRows=@();SmokeStage=0;ViewerVerified=$false;SmokeError='';QueueWorker=$null;QueueHandle=$null;QueueShared=$null;Queue=(Initialize-CorpusQueue $Root);QueueStamp='';QueueTicks=0;NeedsRefresh=$false}
+    $mutators=@('CreateSubject','RenameSubject','AddChannel','RemoveChannel','SyncSelected','SyncAll','Refresh','CreateVideoSubject','ImportVideo','Build','Search','FilterCorpus','RefreshChannelTranscripts','RefreshVideoTranscript','OpenTranscript','AutoExport','QueueStart','QueuePause','QueueRemove','QueueRetry','QueueClear')
     $ui.Paths.Text="Application and corpus root: $Root`nWorkbook: $(Join-Path $Root 'output/YouTubeCorpus.xlsx')`nSource configuration: $(Join-Path $Root 'config.json')`nNative dependencies: $(Get-CorpusNativeRoot)"
     $dependencySettings=Get-CorpusDependencySettings $Root
     $ui.DependencyChannel.SelectedIndex=if($dependencySettings.YtDlpChannel -eq 'nightly'){1}else{0}
+    function Update-SubjectLock {
+        $selected=$ui.SubjectPick.SelectedItem
+        $locked=$selected -and @($state.Queue.Items | Where-Object {$_.SubjectId -eq $selected.id -and $_.Status -in @('Pending','Running')}).Count -gt 0
+        $ui.RenameSubject.IsEnabled=(-not $state.Worker -and $state.Ready -and -not $state.RestartRequired -and -not $locked)
+        $ui.SubjectLockNotice.Text=if($locked){'This subject has queued work. Its name is locked until those items finish or are removed.'}else{''}
+    }
+    function Update-QueueButtons {
+        $available=(-not $state.Worker -and -not $state.Closing -and $state.Ready -and -not $state.RestartRequired)
+        $selected=$ui.QueueGrid.SelectedItem
+        $ui.QueueRemove.IsEnabled=($available -and $selected -and $selected.Status -eq 'Pending')
+        $ui.QueueRetry.IsEnabled=($available -and $selected -and $selected.Status -in @('Failed','Cancelled'))
+        $ui.QueueClear.IsEnabled=($available -and @($state.Queue.Items | Where-Object {$_.Status -notin @('Pending','Running')}).Count -gt 0)
+        $ui.QueueStart.IsEnabled=($available -and -not $state.QueueWorker -and @($state.Queue.Items | Where-Object Status -eq Pending).Count -gt 0)
+        $ui.QueuePause.IsEnabled=($available -and [bool]$state.QueueWorker -and -not $state.Queue.Paused)
+        $ui.QueueCancel.IsEnabled=([bool]$state.QueueWorker -and -not $state.QueueShared.Cancel)
+    }
+    function Refresh-QueueView {
+        $selected=if($ui.QueueGrid.SelectedItem){$ui.QueueGrid.SelectedItem.Id}else{''}
+        $state.Queue=Get-CorpusQueue $Root
+        $ui.QueueGrid.ItemsSource=@($state.Queue.Items)
+        foreach($item in $state.Queue.Items){if($item.Id -eq $selected){$ui.QueueGrid.SelectedItem=$item;break}}
+        $pending=@($state.Queue.Items | Where-Object Status -eq Pending).Count
+        $active=@($state.Queue.Items | Where-Object Status -eq Running).Count
+        $ui.QueueStatus.Text="$(if($state.Queue.Paused){'Paused'}else{'Running'}) | $pending pending | $active active"
+        Update-SubjectLock;Update-QueueButtons
+    }
     function Set-Busy([bool]$Busy) {
         foreach($name in $mutators){$ui[$name].IsEnabled=(-not $Busy -and $state.Ready -and -not $state.RestartRequired)}
         foreach($name in @('CheckDependencies','UpdateDependencies','RecoverDependencies','DependencyChannel','DependenciesGrid')){$ui[$name].IsEnabled=(-not $Busy)}
         $ui.RestartApplication.IsEnabled=(-not $Busy);$ui.RestartApplication.Visibility=if($state.RestartRequired){'Visible'}else{'Collapsed'}
+        if($state.QueueWorker){foreach($name in @('SyncSelected','SyncAll','Build','CheckDependencies','UpdateDependencies','RecoverDependencies','DependencyChannel','DependenciesGrid','RestartApplication','QueueStart')){$ui[$name].IsEnabled=$false}}
+        $ui.QueuePause.IsEnabled=(-not $Busy -and [bool]$state.QueueWorker)
+        $ui.QueueCancel.IsEnabled=([bool]$state.QueueWorker -and -not $state.QueueShared.Cancel)
         $ui.Cancel.IsEnabled=$Busy -and $state.Operation -notin @('Bootstrap','RecoverDependencies')
+        Update-SubjectLock;Update-QueueButtons
     }
     function Get-DependencyChannel {return [string]$ui.DependencyChannel.SelectedItem.Content}
     function Set-DependencyRows($Rows) {
@@ -47,11 +78,12 @@ function Show-CorpusWindow {
         if($state.Worker){return}
         if($Operation -in @('SyncAll','SyncChannel','Video')){$Arguments.SkipWorkbook=(-not [bool]$ui.AutoExport.IsChecked)}
         if($Operation -eq 'Search'){$state.SearchText=$Arguments.Text}
+        if($Operation -eq 'QueueAdd'){$state.QueuedInput=$Arguments.Text}
         $state.Operation=$Operation;$state.Shared=[hashtable]::Synchronized(@{Cancel=$false;CommitInProgress=$false;DependenciesChanged=$false;Progress=$null;Messages=[Collections.Concurrent.ConcurrentQueue[string]]::new()})
         $ps=[powershell]::Create()
         $null=$ps.AddScript({param($root,$op,$argsMap,$shared,$codeRoot)
             $ErrorActionPreference='Stop'
-            foreach($name in @('Logging','Core','Process','Dependencies','RateLimit','DependencyTransaction','Transcript','YouTube','Excel','Operations')){Import-Module (Join-Path $codeRoot "src/Corpus.$name.psm1") -Force -Global}
+            foreach($name in @('Logging','Core','Process','Dependencies','RateLimit','DependencyTransaction','Transcript','YouTube','Excel','Operations','Queue')){Import-Module (Join-Path $codeRoot "src/Corpus.$name.psm1") -Force -Global}
             if($op -eq 'Bootstrap') {
                 & (Join-Path $codeRoot 'Install-Dependencies.ps1') -Root $root -ProgressPath (Join-Path $root 'logs/bootstrap-progress.txt')
                 return 'Dependencies ready'
@@ -64,6 +96,8 @@ function Show-CorpusWindow {
                     'RecoverDependencies' {return Repair-CorpusDependencies $ctx}
                 }
             }
+            if($op -eq 'QueueAdd'){return Add-CorpusQueueUrls $root $argsMap.Text $argsMap.SubjectId -RefreshTranscript:([bool]$argsMap.RefreshTranscript) -ExportWorkbook:([bool]$argsMap.ExportWorkbook)}
+            if($op -eq 'QueueAction'){Update-CorpusQueue $root $argsMap.Action $argsMap.Id;return}
             if($op -eq 'Transcript') {
                 if($argsMap.VideoId -notmatch '^[A-Za-z0-9_-]{11}$'){throw 'Invalid video ID.'}
                 $video=Read-CorpusJson (Join-Path $root "data/normalized/videos/$($argsMap.VideoId).json")
@@ -86,8 +120,11 @@ function Show-CorpusWindow {
     function Show-SubjectChannels {
         $selected=$ui.SubjectPick.SelectedItem
         if($selected){$ui.SubjectName.Text=$selected.name;$ui.SubjectChannels.ItemsSource=@($selected.channels)}else{$ui.SubjectChannels.ItemsSource=@()}
+        Update-SubjectLock
     }
     function Set-Snapshot($Snapshot) {
+        $subjectDraft=$ui.SubjectName.Text
+        $oldSubjectName=if($ui.SubjectPick.SelectedItem){$ui.SubjectPick.SelectedItem.name}else{''}
         $state.Snapshot=$Snapshot
         $subjectId=if($ui.SubjectPick.SelectedItem){$ui.SubjectPick.SelectedItem.id}else{''}
         $videoId=if($ui.VideoSubject.SelectedItem){$ui.VideoSubject.SelectedItem.id}else{''}
@@ -104,6 +141,7 @@ function Show-CorpusWindow {
         $ui.ChannelsGrid.ItemsSource=$channelRows
         $ui.CorpusGrid.ItemsSource=@($Snapshot.Videos | Select-Object SubjectName,ChannelName,VideoTitle,VideoId,PublishedDate,Duration,TranscriptAvailable,SubtitleSource,LastSyncStatus,VideoUrl)
         Show-SubjectChannels
+        if($subjectDraft -ne $oldSubjectName){$ui.SubjectName.Text=$subjectDraft}
     }
     function Show-UiError($Message){$ui.Status.Text=$Message;$ui.LogText.AppendText("ERROR: $Message`r`n");[Windows.MessageBox]::Show($window,$Message,'YT-OSINT','OK','Warning') | Out-Null}
     function Get-SelectedSubject {if(-not $ui.SubjectPick.SelectedItem){throw 'Select a subject first.'};return $ui.SubjectPick.SelectedItem}
@@ -138,7 +176,26 @@ function Show-CorpusWindow {
     $ui.Refresh.Add_Click({Start-Work 'Refresh'})
     $ui.ClearVideoSubject.Add_Click({$ui.VideoSubject.SelectedIndex=-1})
     $ui.CreateVideoSubject.Add_Click({$state.PendingSubject=$ui.NewVideoSubject.Text.Trim();Start-Work 'Subject' @{Name=$state.PendingSubject;Id=''}})
-    $ui.ImportVideo.Add_Click({try{$url=Assert-CorpusYouTubeUrl $ui.VideoUrl.Text.Trim();$s=$ui.VideoSubject.SelectedItem;Start-Work 'Video' @{Url=$url;RefreshTranscript=[bool]$ui.RefreshVideoTranscript.IsChecked;SubjectId=$(if($s){$s.id}else{''});SubjectName=$(if($s){$s.name}else{''})}}catch{Show-UiError $_.Exception.Message}})
+    $ui.ImportVideo.Add_Click({$s=$ui.VideoSubject.SelectedItem;Start-Work 'QueueAdd' @{Text=$ui.VideoUrl.Text;SubjectId=$(if($s){$s.id}else{''});RefreshTranscript=[bool]$ui.RefreshVideoTranscript.IsChecked;ExportWorkbook=[bool]$ui.AutoExport.IsChecked}})
+    function Start-QueueWork {
+        if($state.QueueWorker -or $state.Worker -or $state.Closing -or -not $state.Ready -or $state.RestartRequired){return}
+        $state.QueueShared=[hashtable]::Synchronized(@{Cancel=$false;Shutdown=$false;Progress=$null;Messages=[Collections.Concurrent.ConcurrentQueue[string]]::new()})
+        $ps=[powershell]::Create()
+        $null=$ps.AddScript({param($root,$shared,$codeRoot,$testAdapter)
+            $ErrorActionPreference='Stop'
+            foreach($name in @('Logging','Core','Process','Dependencies','RateLimit','DependencyTransaction','Transcript','YouTube','Excel','Operations','Queue')){Import-Module (Join-Path $codeRoot "src/Corpus.$name.psm1") -Force -Global}
+            if($testAdapter){& (Get-Module Corpus.Queue) ([scriptblock]::Create($testAdapter))}
+            Invoke-CorpusQueue $root $shared
+        }).AddArgument($Root).AddArgument($state.QueueShared).AddArgument($appRoot).AddArgument($(if($SmokeTest){$SmokeQueueAdapter}else{''}))
+        $state.QueueWorker=$ps;$state.QueueHandle=$ps.BeginInvoke();Set-Busy $false
+    }
+    $ui.QueueGrid.Add_SelectionChanged({Update-QueueButtons})
+    $ui.QueueStart.Add_Click({Start-QueueWork})
+    $ui.QueuePause.Add_Click({Start-Work 'QueueAction' @{Action='Pause';Id=''}})
+    $ui.QueueCancel.Add_Click({if($state.QueueShared){$state.QueueShared.Cancel=$true;$ui.QueueCancel.IsEnabled=$false}})
+    $ui.QueueRemove.Add_Click({if($ui.QueueGrid.SelectedItem){Start-Work 'QueueAction' @{Action='Remove';Id=$ui.QueueGrid.SelectedItem.Id}}})
+    $ui.QueueRetry.Add_Click({if($ui.QueueGrid.SelectedItem){Start-Work 'QueueAction' @{Action='Retry';Id=$ui.QueueGrid.SelectedItem.Id}}})
+    $ui.QueueClear.Add_Click({Start-Work 'QueueAction' @{Action='ClearFinished';Id=''}})
     $ui.Build.Add_Click({Start-Work 'Build'})
     function Get-CorpusFilters {
         $s=$ui.SearchSubject.SelectedItem
@@ -174,6 +231,28 @@ function Show-CorpusWindow {
     $ui.Cancel.Add_Click({if($state.Shared){$state.Shared.Cancel=$true;$ui.Cancel.IsEnabled=$false;$ui.Status.Text='Cancelling safely…'}})
     $timer=[Windows.Threading.DispatcherTimer]::new();$timer.Interval=[timespan]::FromMilliseconds(200)
     $timer.Add_Tick({
+        $state.QueueTicks++
+        if($state.QueueTicks % 5 -eq 0){
+            try{$file=Get-Item (Join-Path $Root 'data/queue.json') -ErrorAction SilentlyContinue;$stamp=if($file){$file.LastWriteTimeUtc.Ticks.ToString()}else{''};if($stamp -ne $state.QueueStamp){$state.QueueStamp=$stamp;Refresh-QueueView}}catch{$ui.QueueStatus.Text=$_.Exception.Message}
+        }
+        if($state.QueueWorker){
+            $queueMessage='';$queueCount=0
+            while($queueCount -lt 50 -and $state.QueueShared.Messages.TryDequeue([ref]$queueMessage)){$ui.LogText.AppendText($queueMessage+"`r`n");$queueCount++}
+            if($ui.LogText.Text.Length -gt 80000){$ui.LogText.Text=$ui.LogText.Text.Substring($ui.LogText.Text.Length-50000)}
+            $qp=$state.QueueShared.Progress
+            if($qp){$ui.QueueStatus.Text="$(if($state.Queue.Paused){'Pausing after current'}else{'Running'}) | $($qp.Stage) | $($qp.Item)"}
+            if($state.QueueHandle.IsCompleted){
+                try{$null=$state.QueueWorker.EndInvoke($state.QueueHandle);if($state.QueueWorker.HadErrors){throw $state.QueueWorker.Streams.Error[0].Exception.Message}}
+                catch{$ui.LogText.AppendText("Queue: $($_.Exception.Message)`r`n");$ui.Status.Text=$_.Exception.Message}
+                finally{$state.QueueWorker.Dispose();$state.QueueWorker=$null;$state.QueueHandle=$null;Refresh-QueueView;Set-Busy ([bool]$state.Worker);$state.NeedsRefresh=$true}
+            }
+        }
+        if($state.Closing -and -not $state.Worker -and -not $state.QueueWorker){$window.Close();return}
+        if($state.NeedsRefresh -and -not $state.Worker -and -not $state.Closing){$state.NeedsRefresh=$false;Start-Work 'Refresh'}
+
+        if($SmokeTest -and $SmokeQueueCheck -and $state.Snapshot -and -not $state.Closing){
+            try{& $SmokeQueueCheck $window $ui $state}catch{$state.SmokeError=$_.Exception.Message;$window.Close()}
+        }
         if($SmokeCorpus -and -not $state.Worker -and $state.Snapshot -and $state.SmokeStage -lt 3){
             try {
                 switch($state.SmokeStage){
@@ -190,7 +269,7 @@ function Show-CorpusWindow {
                 }
             }catch{$state.SmokeError=$_.Exception.Message;$window.Close()}
         }
-        if($SmokeTest){$state.SmokeTicks++;if($state.SmokeTicks -gt 15 -and -not $state.Worker){
+        if($SmokeTest){$state.SmokeTicks++;if($state.SmokeTicks -gt 15 -and -not $state.Worker -and -not $state.QueueWorker -and -not $SmokeQueueCheck){
             if($ScreenshotPath){
                 $bitmap=[Windows.Media.Imaging.RenderTargetBitmap]::new([int]$window.ActualWidth,[int]$window.ActualHeight,96,96,[Windows.Media.PixelFormats]::Pbgra32)
                 $bitmap.Render($window);$encoder=[Windows.Media.Imaging.PngBitmapEncoder]::new();$encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
@@ -218,10 +297,12 @@ function Show-CorpusWindow {
                     'Refresh' {if($result.Count){Set-Snapshot $result[-1]}}
                     'Search' {$ui.SearchGrid.ItemsSource=$result;$ui.CorpusGrid.Visibility='Collapsed';$ui.SearchGrid.Visibility='Visible';$ui.CorpusNotice.Text="$($result.Count) matching segments. Double-click a result to read its transcript.";$ui.Status.Text="$($result.Count) matches"}
                     'Transcript' {if($result.Count){$viewerData=$result[-1]}}
+                    'QueueAdd' {if($result.Count){$ui.QueueAddNotice.Text="$($result[-1].Added) added; $($result[-1].Duplicates) duplicates skipped";if($ui.VideoUrl.Text -eq $state.QueuedInput){$ui.VideoUrl.Clear()}};Refresh-QueueView}
+                    'QueueAction' {Refresh-QueueView}
                     'Filter' {$ui.CorpusGrid.ItemsSource=$result;$ui.CorpusGrid.Visibility='Visible';$ui.SearchGrid.Visibility='Collapsed';$ui.CorpusNotice.Text="$($result.Count) videos. Double-click a row to read its transcript."}
                     default {if($result.Count -and $result[-1].PSObject.Properties['FinalState']){$ui.Status.Text="$($result[-1].FinalState): $($result[-1].VideosDiscovered) discovered; $($result[-1].TranscriptsAdded) transcripts added; $($result[-1].TranscriptsUnavailable) unavailable; $($result[-1].Failures) failures; $(Get-CorpusProperty $result[-1] MembersOnlySkipped 0) members-only skipped"}}
                 }
-            }catch{$failed=$true;$state.WorkerError=$_.Exception.GetBaseException().Message;$ui.Status.Text=if($state.Shared.Cancel){'Cancelled; completed work preserved.'}elseif(Test-CorpusRateLimitError $_.Exception){'YouTube rate limit - sync stopped. Wait at least 8 minutes before retrying.'}else{'Operation failed; see Logs / Status.'};$ui.LogText.AppendText($_.Exception.GetBaseException().Message+"`r`n")}
+            }catch{$failed=$true;$state.WorkerError=$_.Exception.GetBaseException().Message;$ui.Status.Text=if($state.Shared.Cancel){'Cancelled; completed work preserved.'}elseif(Test-CorpusRateLimitError $_.Exception){'YouTube rate limit - sync stopped. Wait at least 8 minutes before retrying.'}else{'Operation failed; see Logs / Status.'};$ui.LogText.AppendText($_.Exception.GetBaseException().Message+"`r`n");if($op -eq 'QueueAdd'){$ui.QueueAddNotice.Text=$_.Exception.GetBaseException().Message}}
             finally{if($op -in @('UpdateDependencies','RecoverDependencies')){$state.RestartRequired=(-not $failed -or [bool]$state.Shared.DependenciesChanged);$ui.DependencyNotice.Text=if($failed){'Update did not complete. See Logs / Status for details.'}else{'Updates complete. Restarting YT-OSINT…'}};if($op -ne 'Refresh'){$state.LastOutcome=$ui.Status.Text};$state.Worker.Dispose();$state.Worker=$null;$state.Handle=$null;$ui.Progress.IsIndeterminate=$false;$ui.Progress.Value=0;Set-Busy $false}
             if($state.Closing){$window.Close();return}
             if($viewerData){try{Show-CorpusTranscriptWindow -Owner $window -Video $viewerData.Video -Rows $viewerData.Rows -Query $viewerData.Query -SegmentId $viewerData.SegmentId -SmokeTest:$SmokeCorpus | Out-Null;if($SmokeCorpus){$state.ViewerVerified=$true}}catch{if($SmokeCorpus){$state.SmokeError=$_.Exception.Message;$window.Close()}else{Show-UiError $_.Exception.Message}}}
@@ -231,17 +312,19 @@ function Show-CorpusWindow {
             elseif($op -eq 'Refresh'){$ui.Status.Text=$state.LastOutcome;if(-not $state.CheckedStartup){$state.CheckedStartup=$true;Start-Work 'CheckDependencies' @{Channel=(Get-DependencyChannel);Force=$false}}}
         }
     })
-    $window.Add_Closing({param($sender,$e) if($state.Worker){$e.Cancel=$true;$state.Closing=$true;if($state.Operation -ne 'Bootstrap'){$state.Shared.Cancel=$true};$ui.Status.Text='Finishing safely before closing…'}})
+    $window.Add_Closing({param($sender,$e) if($state.QueueWorker){$e.Cancel=$true;$state.Closing=$true;$state.QueueShared.Shutdown=$true;$state.QueueShared.Cancel=$true};if($state.Worker){$e.Cancel=$true;$state.Closing=$true;if($state.Operation -ne 'Bootstrap'){$state.Shared.Cancel=$true};$ui.Status.Text='Finishing safely before closing…'}})
     $window.Add_ContentRendered({if($SmokeCheckDependencies -or $OpenDependencies){$ui.SettingsTab.IsSelected=$true};if($SkipDependencies){Start-Work 'Refresh'}else{Start-Work 'Bootstrap'};$timer.Start()})
+    Refresh-QueueView
     Set-Busy $true
     try{
         $null=$window.ShowDialog()
         if($SmokeTest){
+            if($state.SmokeError){throw $state.SmokeError}
             if($SmokeCorpus -and (-not $state.ViewerVerified -or $state.SmokeError)){throw "Corpus workflow verification failed: $($state.SmokeError)"}
             if(-not $state.Ready -or -not $state.Snapshot){throw 'GUI smoke test failed: background initialization did not complete.'}
             if($SmokeCheckDependencies -and $state.DependencyRows.Count -ne 4){throw 'Dependency page did not receive all four background check results.'}
             [pscustomobject]@{Ready=$state.Ready;Subjects=$state.Snapshot.Config.subjects.Count;DispatcherTicks=$state.SmokeTicks;WorkerIdle=($null -eq $state.Worker);Dependencies=$state.DependencyRows.Count}
         }
-    }finally{$timer.Stop();if($state.Worker){$state.Shared.Cancel=$true;$state.Worker.Dispose()};if($state.RestartTicket){[IO.File]::WriteAllText($state.RestartTicket.SignalPath,'ready');$state.RestartTicket.Process.Dispose()}}
+    }finally{$timer.Stop();if($state.QueueWorker){$state.QueueShared.Shutdown=$true;$state.QueueShared.Cancel=$true;$state.QueueWorker.Dispose()};if($state.Worker){$state.Shared.Cancel=$true;$state.Worker.Dispose()};if($state.RestartTicket){[IO.File]::WriteAllText($state.RestartTicket.SignalPath,'ready');$state.RestartTicket.Process.Dispose()}}
 }
 Export-ModuleMember -Function Show-CorpusWindow,Start-CorpusRestart

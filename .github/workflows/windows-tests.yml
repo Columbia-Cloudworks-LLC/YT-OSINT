@@ -33,3 +33,6 @@ jobs:
       - name: Exercise WPF transcript viewer and corpus search
         shell: powershell
         run: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-ViewerIntegration.ps1
+      - name: Exercise queue controls during active downloads
+        shell: powershell
+        run: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-QueueIntegration.ps1

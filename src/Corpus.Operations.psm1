@@ -1,6 +1,9 @@
 ﻿Set-StrictMode -Version 2
 function Invoke-CorpusOperation {
-    param([string]$Root,[string]$Operation,$Arguments=@{},$Shared=$null)
+    param([string]$Root,[string]$Operation,$Arguments=@{},$Shared=$null,$CorpusLock=$null)
+    # Configuration has its own short lock, independent of the network/import lock.
+    if($Operation -eq 'Subject'){return Set-CorpusSubject $Root $Arguments.Name $Arguments.Id}
+    if($Operation -eq 'Associate'){Set-CorpusChannelAssociation $Root $Arguments.SubjectId $Arguments.Url -Remove:([bool]$Arguments.Remove);return}
     $ctx=New-CorpusContext $Root $Shared
     # A file handle lock excludes other GUI/CLI writers; crashes release it automatically.
     $lock=$null; $run=$null; $dependencyLock=$null; $dependencyCommitLock=$null
@@ -10,7 +13,7 @@ function Invoke-CorpusOperation {
             $dependencyCommitLock=Enter-CorpusDependencyLock -Commit
             if(@(Get-CorpusDependencyRecovery).Count){throw 'An interrupted dependency update requires recovery in Settings > Dependencies.'}
         }
-        if($Operation -notin @('Search','Refresh')) {
+        if(-not $CorpusLock -and $Operation -notin @('Search','Refresh')) {
             try{$lock=[IO.File]::Open((Join-Path $Root 'data/corpus.lock'),[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)}catch{throw 'Another application instance is writing this corpus. Wait for it to finish.'}
         }
         if($Operation -in @('SyncAll','SyncChannel','Video','Build')) {
