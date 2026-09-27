@@ -11,7 +11,7 @@
 <StatusBar DockPanel.Dock="Bottom" Margin="0,12,0,0" Background="#E4EAF2"><StatusBarItem><TextBlock x:Name="Status" Text="Starting…" Width="620" TextTrimming="CharacterEllipsis"/></StatusBarItem><StatusBarItem><ProgressBar x:Name="Progress" Width="210" Height="16"/></StatusBarItem><StatusBarItem><Button x:Name="Cancel" Content="Cancel" IsEnabled="False"/></StatusBarItem></StatusBar>
 <TabControl x:Name="Tabs">
 <TabItem Header="Subjects"><Grid Margin="12"><Grid.ColumnDefinitions><ColumnDefinition Width="280" MinWidth="200"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-<DockPanel Margin="4"><Button x:Name="CreateSubject" DockPanel.Dock="Top" Content="Add subject" HorizontalAlignment="Left"/><ComboBox x:Name="SubjectSort" DockPanel.Dock="Top" SelectedIndex="0" MinWidth="0"><ComboBoxItem Content="A–Z"/><ComboBoxItem Content="Z–A"/></ComboBox><TextBlock DockPanel.Dock="Top" Text="Select a subject to manage its channels." Margin="4,8" TextWrapping="Wrap"/><ListBox x:Name="SubjectPick" DisplayMemberPath="name" Padding="4" ScrollViewer.HorizontalScrollBarVisibility="Disabled"/></DockPanel>
+<DockPanel Margin="4"><Button x:Name="CreateSubject" DockPanel.Dock="Top" Content="Add subject" HorizontalAlignment="Left"/><ComboBox x:Name="SubjectSort" DockPanel.Dock="Top" SelectedIndex="0" MinWidth="0"><ComboBoxItem Content="A–Z"/><ComboBoxItem Content="Z–A"/></ComboBox><TextBlock DockPanel.Dock="Top" Text="Select a subject to manage its channels." Margin="4,8" TextWrapping="Wrap"/><ListBox x:Name="SubjectPick" Padding="4" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListBox.ItemTemplate><DataTemplate><StackPanel ToolTip="{Binding StatusLabel}"><TextBlock Text="{Binding name}"/><TextBlock Text="{Binding StatusLabel}" FontSize="11" Foreground="#52657A" TextWrapping="Wrap"/></StackPanel></DataTemplate></ListBox.ItemTemplate></ListBox></DockPanel>
 <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="#D7DFEB"/>
 <Grid Grid.Column="2" Margin="12,4,4,4"><Grid.RowDefinitions><RowDefinition Height="3*" MinHeight="240"/><RowDefinition Height="8"/><RowDefinition Height="2*" MinHeight="170"/></Grid.RowDefinitions><DockPanel><StackPanel DockPanel.Dock="Top">
 <TextBlock x:Name="SubjectHeading" Text="Select or add a subject" FontSize="22" Margin="4,8"/>
@@ -19,7 +19,7 @@
 <TextBlock x:Name="SubjectLockNotice" Margin="8" Foreground="#815A16" TextWrapping="Wrap"/>
 <WrapPanel><TextBox x:Name="ChannelUrl" Width="360" ToolTip="HTTPS YouTube channel URL"/><Button x:Name="AddChannel" Content="Add channel"/><Button x:Name="RemoveChannel" Content="Remove selected channel"/></WrapPanel>
 <TextBlock Text="Removing a subject preserves its captured videos and transcripts." Margin="8" TextWrapping="Wrap"/>
-</StackPanel><DataGrid x:Name="SubjectChannels" Margin="4,12,4,4"/></DockPanel><GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch" Background="#D7DFEB"/><StackPanel Grid.Row="2"><TextBlock Text="Batch video imports" FontSize="22" Margin="4,0,4,8"/>
+</StackPanel><DataGrid x:Name="SubjectChannels" AutoGenerateColumns="False" Margin="4,12,4,4"><DataGrid.Columns><DataGridTextColumn Header="Channel" Binding="{Binding Url}" Width="*"/><DataGridTextColumn Header="Sync status" Binding="{Binding StatusLabel}" Width="240"/><DataGridTextColumn Header="Last full sync" Binding="{Binding LastSuccessfulSync}" Width="160"/></DataGrid.Columns></DataGrid></DockPanel><GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch" Background="#D7DFEB"/><StackPanel Grid.Row="2"><TextBlock Text="Batch video imports" FontSize="22" Margin="4,0,4,8"/>
 <TextBlock Text="Paste one video URL per line. Downloads belong to the selected subject." Margin="4"/>
 <TextBox x:Name="VideoUrl" Height="80" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap" ToolTip="One HTTPS YouTube video URL per line"/>
 
@@ -27,18 +27,18 @@
 </StackPanel></Grid>
 </Grid></TabItem>
 <TabItem Header="Channels"><Grid Margin="12"><Grid.ColumnDefinitions><ColumnDefinition Width="300" MinWidth="200"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-<DockPanel Margin="4"><WrapPanel DockPanel.Dock="Top"><Button x:Name="SyncAll" Content="Queue all channels"/><Button x:Name="Refresh" Content="Refresh"/></WrapPanel><ListBox x:Name="ChannelsGrid" DisplayMemberPath="DisplayName" Padding="4" ScrollViewer.HorizontalScrollBarVisibility="Disabled"/></DockPanel>
+<DockPanel Margin="4"><WrapPanel DockPanel.Dock="Top"><Button x:Name="SyncAll" Content="Queue all channels"/><Button x:Name="Refresh" Content="Refresh"/></WrapPanel><ListBox x:Name="ChannelsGrid" Padding="4" ScrollViewer.HorizontalScrollBarVisibility="Disabled"><ListBox.ItemTemplate><DataTemplate><StackPanel ToolTip="{Binding StatusHint}"><TextBlock Text="{Binding DisplayName}" TextWrapping="Wrap"/><TextBlock Text="{Binding StatusLabel}" FontSize="11" Foreground="#52657A" TextWrapping="Wrap"/></StackPanel></DataTemplate></ListBox.ItemTemplate></ListBox></DockPanel>
 <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Center" Background="#D7DFEB"/>
 <DockPanel Grid.Column="2" Margin="12,4"><StackPanel DockPanel.Dock="Top"><TextBlock x:Name="ChannelHeading" Text="Select a channel" FontSize="22" Margin="4,8" TextWrapping="Wrap"/><TextBlock x:Name="ChannelSyncStatus" Margin="4,8" TextWrapping="Wrap"/><WrapPanel><Button x:Name="SyncSelected" Content="Queue channel sync"/><Button x:Name="CancelSync" Content="Cancel sync"/><CheckBox x:Name="RefreshChannelTranscripts" Content="Refresh saved transcripts" Margin="8" VerticalAlignment="Center"/></WrapPanel></StackPanel>
 <DataGrid x:Name="ChannelDetails" AutoGenerateColumns="False" Margin="4,12"><DataGrid.Columns><DataGridTextColumn Header="Field" Binding="{Binding Field}" Width="190"/><DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="*"/></DataGrid.Columns></DataGrid></DockPanel>
 </Grid></TabItem>
 <TabItem x:Name="QueueTab" Header="Video Queue"><DockPanel Margin="16">
 <StackPanel DockPanel.Dock="Top">
-<WrapPanel><Button x:Name="QueueStart" Content="Start / resume"/><Button x:Name="QueuePause" Content="Pause after current"/><Button x:Name="QueueCancel" Content="Cancel current and pause"/><Button x:Name="QueueRemove" Content="Remove pending item"/><Button x:Name="QueueRetry" Content="Retry selected"/><Button x:Name="QueueClear" Content="Clear finished"/></WrapPanel>
-<TextBlock x:Name="QueueStatus" Text="Queue paused" Margin="8" TextWrapping="Wrap"/>
+<WrapPanel><Button x:Name="QueueStart" Content="Start / resume"/><Button x:Name="QueuePause" Content="Pause after current"/><Button x:Name="QueueCancel" Content="Cancel current and pause"/><Button x:Name="QueueRemove" Content="Remove selected pending items"/><Button x:Name="QueueRetry" Content="Retry selected"/><Button x:Name="QueueClear" Content="Clear finished"/></WrapPanel>
+<TextBlock x:Name="QueueSelection" Margin="8,0"/><TextBlock x:Name="QueueStatus" Text="Queue paused" Margin="8" TextWrapping="Wrap"/>
 </StackPanel>
 <TextBlock DockPanel.Dock="Bottom" Text="Pending items can be removed. Names of subjects with pending or active items are locked. Saved queues reopen paused." Margin="4,10" TextWrapping="Wrap"/>
-<DataGrid x:Name="QueueGrid" AutoGenerateColumns="False" Margin="4"><DataGrid.Columns>
+<DataGrid x:Name="QueueGrid" SelectionMode="Extended" SelectionUnit="FullRow" AutoGenerateColumns="False" Margin="4"><DataGrid.Columns>
 <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="95"/>
 <DataGridTextColumn Header="Video" Binding="{Binding Title}" Width="240"/>
 <DataGridTextColumn Header="Subject" Binding="{Binding SubjectName}" Width="150"/>
@@ -88,6 +88,19 @@
 <DataGridTextColumn Header="Details" Binding="{Binding Detail}" IsReadOnly="True"/>
 </DataGrid.Columns></DataGrid>
 </DockPanel></TabItem>
-<TabItem Header="Storage"><StackPanel Margin="20"><TextBlock x:Name="Paths" TextWrapping="Wrap"/><WrapPanel Margin="0,20"><Button x:Name="OpenData" Content="Open data folder"/><Button x:Name="OpenConfig" Content="Open configuration"/></WrapPanel></StackPanel></TabItem>
+<TabItem x:Name="StorageTab" Header="Storage"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="20">
+<TextBlock Text="Storage and sync freshness" FontSize="22" Margin="4,0,4,12"/>
+<TextBlock x:Name="Paths" TextWrapping="Wrap"/>
+<TextBlock Text="Corpus folder" Margin="4,16,4,0"/><DockPanel><Button x:Name="BrowseStorage" Content="Browse…" DockPanel.Dock="Right"/><TextBox x:Name="StorageRoot" ToolTip="Absolute path to the corpus folder"/></DockPanel>
+<TextBlock Text="Configuration, data, queue history, exports and logs stay together in this folder." TextWrapping="Wrap" Margin="4"/>
+<RadioButton x:Name="StorageSwitch" GroupName="StorageMode" Content="Switch/create corpus — open an existing corpus or create an empty one" IsChecked="True" Margin="4,8"/>
+<RadioButton x:Name="StorageMove" GroupName="StorageMode" Content="Move existing corpus — copy and verify current data, then use the new folder" Margin="4,8"/>
+<TextBlock Text="Move requires an empty destination and retains the original as a backup. Switch leaves the current corpus untouched. Location changes require a restart; pending work stays paused." TextWrapping="Wrap" Margin="4"/>
+<TextBlock x:Name="StoragePreview" TextWrapping="Wrap" Margin="4,8"/>
+<WrapPanel><TextBlock Text="Consider channels stale after" VerticalAlignment="Center" Margin="4"/><TextBox x:Name="StaleDays" Width="70"/><TextBlock Text="days (1–3650)" VerticalAlignment="Center"/></WrapPanel>
+<WrapPanel><Button x:Name="SaveStorage" Content="Save settings"/><Button x:Name="CancelStorage" Content="Cancel changes"/><Button x:Name="StorageRestart" Content="Restart to apply location" Visibility="Collapsed"/></WrapPanel>
+<TextBlock x:Name="StorageNotice" TextWrapping="Wrap" Margin="4"/>
+<WrapPanel Margin="0,12"><Button x:Name="OpenData" Content="Open data folder"/><Button x:Name="OpenConfig" Content="Open configuration"/></WrapPanel>
+</StackPanel></ScrollViewer></TabItem>
 </TabControl></TabItem>
 </TabControl></DockPanel></Window>

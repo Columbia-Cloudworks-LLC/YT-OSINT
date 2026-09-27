@@ -36,6 +36,7 @@ function Assert-CorpusYouTubeUrl {
 }
 function Get-CorpusConfig {
     param([string]$Root)
+    if(Test-Path -LiteralPath (Join-Path $Root '.yt-osint-migration-incomplete')){throw 'This destination contains an incomplete corpus copy. Use the original corpus and retry Move into a new empty folder.'}
     $config=Read-CorpusJson (Join-Path $Root 'config.json')
     if (-not $config -or -not $config.PSObject.Properties['subjects']) { throw 'config.json must contain a subjects array.' }
     if(-not $config.PSObject.Properties['archivedSubjects']){$config | Add-Member NoteProperty archivedSubjects @()}

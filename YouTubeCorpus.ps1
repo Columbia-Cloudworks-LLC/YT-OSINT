@@ -5,6 +5,7 @@ param(
     [int]$Limit=0, [switch]$RefreshTranscript, [switch]$SkipDependencies, [switch]$SmokeTest, [switch]$OpenDependencies, [string]$RestartSignal=''
 )
 $ErrorActionPreference='Stop'
+$explicitRoot=[bool]$Root
 if(-not $Root){ $Root=Split-Path -Parent $MyInvocation.MyCommand.Path }
 Set-StrictMode -Version 2
 if($RestartSignal){
@@ -17,7 +18,8 @@ if($RestartSignal){
 }
 if(-not $env:SystemRoot){throw 'YT-OSINT requires Windows PowerShell 5.1 on Windows.'}
 $Root=[IO.Path]::GetFullPath($Root).TrimEnd('\','/')
-foreach($name in @('Logging','Core','Process','Dependencies','RateLimit','DependencyTransaction','Transcript','YouTube','Excel','Operations','Gui')){Import-Module (Join-Path $PSScriptRoot "src/Corpus.$name.psm1") -Force -Global}
+foreach($name in @('Logging','Core','Process','Dependencies','RateLimit','DependencyTransaction','Transcript','YouTube','Excel','Operations','Settings','Gui')){Import-Module (Join-Path $PSScriptRoot "src/Corpus.$name.psm1") -Force -Global}
+if(-not $explicitRoot){$preferences=Get-CorpusUserSettings;if($preferences.CorpusRoot){$Root=$preferences.CorpusRoot;if(-not (Test-Path -LiteralPath (Join-Path $Root 'config.json'))){throw 'The saved corpus folder is unavailable. Reconnect it or launch with -Root to select another corpus.'}}}
 $null=New-CorpusContext $Root
 if($Action -eq 'Gui') {
     if([Threading.Thread]::CurrentThread.ApartmentState -ne 'STA'){throw 'Start the GUI with powershell.exe -STA -File YouTubeCorpus.ps1 or use the batch launcher.'}

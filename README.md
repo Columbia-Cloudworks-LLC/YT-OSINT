@@ -82,7 +82,7 @@ Cooldown deadlines and retry counts are saved in `%LOCALAPPDATA%\YT-OSINT\youtub
 5. **Transcript viewer:** read the full timestamped transcript. Type literal text to highlight every occurrence within each segment, ignoring case. **Previous match** and **Next match** navigate matching segments and wrap around; **Show matching segments only** hides other rows. Clear the query to restore the full transcript. Double-click a segment or use **Open selected timestamp** to open YouTube. Missing transcripts show an empty-state message. The viewer renders visible rows on demand, and loads only the selected video's saved transcript.
 6. **Excel export:** GUI imports save the corpus without rebuilding Excel by default. Use **Export Excel workbook** when needed, or enable **Also export Excel after imports** for the current session. Queued items remember the export and refresh choices made when they were added. CLI imports retain automatic export. Excel is an optional view of the canonical JSON files.
 7. **Logs / Status:** inspect progress, counts, warnings, and errors; open the structured per-run log directory.
-8. **Settings → Dependencies:** check releases, review installed paths and providers, select updates, or recover an interrupted update. **Settings → Storage:** inspect paths and open data/configuration.
+8. **Settings → Dependencies:** check releases, review installed paths and providers, select updates, or recover an interrupted update. **Settings → Storage:** configure the corpus folder and sync freshness (see below), and open data/configuration.
 
 ### Current interface
 
@@ -101,6 +101,23 @@ Members-only videos are recorded as **SkippedMembersOnly**, counted separately, 
 Queue processing has its own background PowerShell runspace, separate from subject edits, corpus refreshes, and searches. WPF's dispatcher timer transfers progress and results. You can append or remove pending items and edit unrelated subjects during downloads. While the queue worker is active, more channel syncs can be queued; manual exports and dependency maintenance wait for it to become idle. External processes use asynchronous stdout/stderr readers implemented in a small C# helper loaded by PowerShell. They create no console windows and use Windows-compatible structured argument quoting. Native command logs redact URLs and do not emit signed caption URLs.
 
 The main Cancel button cancels the current foreground operation, such as search or channel sync. **Cancel current and pause** cancels the active queue item and keeps the remaining pending items. Both terminate an active child process tree where practical. Completed atomic commits survive. Excel cancellation is checked between rows/stages; the final EPPlus save is not interruptible mid-write. The application stays interactive and honors cancellation at the next safe boundary. Closing during work requests cancellation and waits for safe cleanup. Only one capture/export writer and one queue runner can operate on a corpus. Queue and subject changes share a separate short file lock, so downloads do not block configuration edits. Closing during a queued import returns the interrupted item to Pending and saves the queue paused. Abandoned Running items are recovered to Pending when no queue runner owns them; the next launch requires an explicit resume.
+
+## Queue selection, status, and storage settings
+
+The Video Queue supports Ctrl+click to toggle rows, Shift+click or Shift+Up/Down to select a range, and Ctrl+A to select all rows. **Remove selected pending items** removes only work that has not started; active/completed items and captured files are preserved. A selection count and removal summary show what happened. Selections survive background queue refreshes. Retry remains a single-item action.
+
+Removing a video from a channel sync permanently marks that attempt as a **Partial channel import**, including every channel job sharing that video. Cancelled rows remain in history for accounting. A partial import never advances the last successful full-sync timestamp; retrying an omitted video independently does not repair that original attempt. A future full sync may include omitted videos again.
+
+Channel lists show text and icons for queued, syncing, paused, partial, failed, cancelled, up-to-date, stale, and never-synced states. Activity and freshness are separate: a failed or partial attempt retains the date of the previous full sync. Locks explain why editing is unavailable. Subjects summarize active work and channel freshness. Unavailable English transcripts and members-only skips retain their existing handling; they are accounted-for results, not user-removed videos.
+
+**Settings → Storage** lets you type or browse to a corpus folder, preview its configuration/data/workbook/log paths, and save one of two choices:
+
+- **Switch/create corpus:** open an existing valid corpus or create an empty one. The current corpus stays untouched.
+- **Move existing corpus:** copy configuration, data, queue history, exports, and logs to an empty destination, verify every file with SHA256, then use that destination. The original remains as a backup. Application code and installed dependencies stay in place. An interrupted or failed copy is marked incomplete and cannot be opened as a corpus; retry from the original into another empty folder.
+
+Location changes require idle workers and a restart. The destination queue opens paused. Corpus folders must be separate, with no nested source/destination or symbolic links/junctions; ordinary OneDrive folders are supported. The related storage paths stay together under the chosen corpus folder.
+
+**Consider channels stale after N days** accepts 1–3650 days (default 7) and applies immediately. “Up to date” means the last full sync is within that age; it does not imply a live check for newly published videos. Settings are saved to `%LOCALAPPDATA%\YT-OSINT\settings.json`. Normal launches use the saved corpus; an explicit `-Root` overrides it. If the saved folder is unavailable, reconnect it or launch with `-Root` rather than creating an empty replacement at that path.
 
 ## Files and architecture
 

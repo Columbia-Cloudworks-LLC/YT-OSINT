@@ -272,3 +272,28 @@ Describe 'Channel discovery without inline downloads' {
         Assert-MockCalled Import-CorpusVideo -ModuleName Corpus.YouTube -Times 0 -Exactly -Scope It
     }
 }
+
+Describe 'Atomic multi-item removal' {
+    BeforeEach {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));$null=New-CorpusContext $root
+        Copy-Item (Join-Path $PSScriptRoot fixtures/config.json) (Join-Path $root config.json)
+        $null=Add-CorpusQueueUrls $root "https://youtu.be/abcDEF12_-3`nhttps://youtu.be/xyzDEF12_-3`nhttps://youtu.be/newDEF12_-3" mo
+    }
+    It 'removes pending selections and skips items claimed by the worker or already missing' {
+        $q=Get-CorpusQueue $root;$q.Items[1].Status='Running';Write-CorpusJson (Join-Path $root data/queue.json) $q
+        $result=Remove-CorpusQueueItems $root @($q.Items[0].Id,$q.Items[1].Id,$q.Items[2].Id,'missing',$q.Items[0].Id)
+        $result.Removed | Should Be 2;$result.Skipped | Should Be 2
+        $remaining=Get-CorpusQueue $root;$remaining.Items.Count | Should Be 1;$remaining.Items[0].Status | Should Be Running
+    }
+    It 'marks all shared jobs partial and never advances the previous full-sync timestamp' {
+        $q=Get-CorpusQueue $root;$q.Items[0].JobIds=@('a','b');$q.Items[1].Status='Completed';$q.Items[1].JobIds=@('a','b')
+        $q.SyncJobs=@(foreach($id in @('a','b')){[pscustomobject]@{Id=$id;Status='Downloading';ChannelId=$id;Url="https://youtube.com/@$id";AddedAt='2026-09-27T00:00:00Z';FinishedAt=$null;Detail=''}})
+        foreach($id in @('a','b')){Write-CorpusJson (Join-Path $root "data/normalized/channels/$id.json") ([pscustomobject]@{ChannelId=$id;LastSync='2026-09-01T00:00:00Z';Status='Downloading';TranscriptCount=0;WithoutTranscripts=0;Failures=0;MembersOnlySkipped=0})}
+        Write-CorpusJson (Join-Path $root data/queue.json) $q
+        $result=Remove-CorpusQueueItems $root @($q.Items[0].Id)
+        $result.Removed | Should Be 1
+        foreach($job in (Get-CorpusQueue $root).SyncJobs){$job.Status | Should Be Partial;$job.PartialImport | Should Be $true;(Read-CorpusJson (Join-Path $root "data/normalized/channels/$($job.Id).json")).LastSync | Should Be '2026-09-01T00:00:00Z'}
+        Update-CorpusQueue $root Retry $q.Items[0].Id
+        foreach($job in (Get-CorpusQueue $root).SyncJobs){$job.Status | Should Be Partial}
+    }
+}

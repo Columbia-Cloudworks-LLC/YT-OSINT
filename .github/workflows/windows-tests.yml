@@ -42,3 +42,6 @@ jobs:
       - name: Exercise unified channel and batch workflow
         shell: powershell
         run: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-UnifiedQueueIntegration.ps1
+      - name: Exercise queue multi-selection and storage settings
+        shell: powershell
+        run: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-SelectionStorageIntegration.ps1

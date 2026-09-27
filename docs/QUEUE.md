@@ -23,7 +23,7 @@ Each job and video stores stable subject IDs. Changing UI selection never reassi
 | Start / resume | Run pending discovery and video work sequentially. |
 | Pause after current | Finish the active discovery or download, then stop. Discovered videos remain pending. |
 | Cancel current and pause | Stop the current discovery/import safely and leave later work pending. |
-| Remove pending item | Remove an unstarted batch item. Sync-linked items remain as Cancelled history so their job can account for them. |
+| Remove selected pending items | Ctrl+click, Shift+click, Shift+arrow or Ctrl+A selects rows. Remove all selected Pending items atomically; skip Running/finished/missing items. Sync-linked items remain as Cancelled history and their jobs become partial channel imports. |
 | Retry selected | Retry a Failed/Cancelled video as an independent item, preserving its assignment and refreshing its subject name. When its sync is still active, the original failure remains in history for accurate sync totals. |
 | Clear finished | Clear terminal video history and preserve captures; terminal items referenced by an active sync are retained until that sync finishes. |
 | Channels → Cancel sync | Stop discovery and cancel downloads belonging only to that sync that have not started. Shared batch downloads remain. An active video is allowed to finish before the channel unlocks. |

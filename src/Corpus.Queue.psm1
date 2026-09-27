@@ -1,6 +1,7 @@
 ﻿Set-StrictMode -Version 2
 function Get-CorpusQueue {
     param([string]$Root)
+    if(Test-Path -LiteralPath (Join-Path $Root '.yt-osint-migration-incomplete')){throw 'This corpus copy is incomplete. Use the original corpus.'}
     $queue=Read-CorpusJson (Join-Path $Root 'data/queue.json')
     if(-not $queue){return [pscustomobject]@{SchemaVersion=1;Paused=$true;Items=@();SyncJobs=@()}}
     if($queue.SchemaVersion -ne 1){throw 'Unsupported queue format.'}
@@ -80,6 +81,27 @@ function Add-CorpusQueueUrls {
         return [pscustomobject]@{Added=$added;Duplicates=$duplicates}
     } finally {$lock.Dispose()}
 }
+function Remove-CorpusQueueItems {
+    param([string]$Root,[string[]]$Ids)
+    $lock=Enter-CorpusConfigLock $Root
+    try {
+        $queue=Get-CorpusQueue $Root;$removed=0;$skipped=0
+        $selected=@{};foreach($id in @($Ids | Select-Object -Unique)){if($id){$selected[$id]=$true}}
+        $drop=@{};$jobsById=@{};foreach($job in $queue.SyncJobs){$jobsById[$job.Id]=$job}
+        $skipped=$selected.Count
+        foreach($item in $queue.Items){
+            if(-not $selected.ContainsKey($item.Id) -or $item.Status -ne 'Pending'){continue}
+            foreach($jobId in $item.JobIds){if($jobsById.ContainsKey($jobId)){$jobsById[$jobId] | Add-Member NoteProperty PartialImport $true -Force}}
+            if(@($item.JobIds).Count){
+                $item.Status='Cancelled';$item.Detail='Removed before download; partial channel import';$item.FinishedAt=[datetime]::UtcNow.ToString('o')
+            }else{$drop[$item.Id]=$true}
+            $removed++;$skipped--
+        }
+        $queue.Items=@($queue.Items | Where-Object {-not $drop.ContainsKey($_.Id)})
+        Save-CorpusQueue $Root $queue
+        return [pscustomobject]@{Removed=$removed;Skipped=$skipped}
+    } finally {$lock.Dispose()}
+}
 function Update-CorpusQueue {
     param([string]$Root,[ValidateSet('Pause','Remove','Retry','ClearFinished')][string]$Action,[string]$Id='')
     $lock=Enter-CorpusConfigLock $Root
@@ -92,6 +114,7 @@ function Update-CorpusQueue {
             if(-not $matches.Count){throw 'This queue item no longer exists.'};$item=$matches[0]
             if($Action -eq 'Remove'){
                 if($item.Status -ne 'Pending'){throw 'Only pending items can be removed.'}
+                foreach($job in $queue.SyncJobs){if($job.Id -in $item.JobIds){$job | Add-Member NoteProperty PartialImport $true -Force}}
                 if(@($item.JobIds).Count){$item.Status='Cancelled';$item.Detail='Removed before download';$item.FinishedAt=[datetime]::UtcNow.ToString('o')}else{$queue.Items=@($queue.Items | Where-Object Id -ne $Id)}
             } else {
                 if($item.Status -notin @('Failed','Cancelled')){throw 'Only failed or cancelled items can be retried.'}
@@ -173,7 +196,7 @@ function Update-CorpusSyncStates {
         if($job.Status -notin @('Downloading','Cancelling')){continue}
         $children=@($Queue.Items | Where-Object {$job.Id -in $_.JobIds})
         if(@($children | Where-Object Status -in @('Pending','Running')).Count){continue}
-        $job.Status=if($job.Status -eq 'Cancelling' -or ($children.Count -and @($children | Where-Object Status -ne Cancelled).Count -eq 0)){'Cancelled'}elseif(@($children | Where-Object Status -in @('Failed','Cancelled')).Count){'Partial'}else{'Completed'}
+        $job.Status=if((Get-CorpusProperty $job PartialImport $false) -and $job.Status -ne 'Cancelling'){'Partial'}elseif($job.Status -eq 'Cancelling' -or ($children.Count -and @($children | Where-Object Status -ne Cancelled).Count -eq 0)){'Cancelled'}elseif(@($children | Where-Object Status -in @('Failed','Cancelled')).Count){'Partial'}else{'Completed'}
         $job.Detail="$($children.Count) videos; $(@($children | Where-Object Status -eq Failed).Count) failed; $(@($children | Where-Object Status -eq Cancelled).Count) cancelled"
         $job.FinishedAt=[datetime]::UtcNow.ToString('o')
         if($job.ChannelId){
@@ -252,4 +275,4 @@ function Invoke-CorpusQueuedDiscovery {
     } finally {$lock.Dispose()}
 }
 
-Export-ModuleMember -Function Get-CorpusQueue,Initialize-CorpusQueue,Add-CorpusQueueUrls,Update-CorpusQueue,Invoke-CorpusQueue,Add-CorpusSyncJob,Stop-CorpusSyncJob
+Export-ModuleMember -Function Get-CorpusQueue,Enter-CorpusQueueRunner,Remove-CorpusQueueItems,Initialize-CorpusQueue,Add-CorpusQueueUrls,Update-CorpusQueue,Invoke-CorpusQueue,Add-CorpusSyncJob,Stop-CorpusSyncJob
