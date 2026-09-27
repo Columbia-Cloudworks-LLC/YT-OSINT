@@ -51,3 +51,6 @@ jobs:
       - name: Exercise large-queue responsiveness
         shell: powershell
         run: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-QueuePerformanceIntegration.ps1 -Sizes 12000
+      - name: Exercise live queue sorting, priority and About
+        shell: powershell
+        run: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-QueueUxIntegration.ps1

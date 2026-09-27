@@ -39,20 +39,23 @@
 <TabItem x:Name="QueueTab" Header="Video Queue"><DockPanel Margin="16">
 <StackPanel DockPanel.Dock="Top">
 <TextBlock Text="Download queue" FontSize="22" FontWeight="SemiBold" Margin="4,0,4,8"/>
-<TextBlock x:Name="QueueStatus" Text="Queue paused" Margin="4" TextWrapping="Wrap"/>
 <ProgressBar x:Name="QueueProgress" Height="8" Margin="4,6,4,8" Foreground="#176BC1"/>
 <TextBlock x:Name="QueueActivity" Text="Start lists every queued channel before downloading videos." Margin="4,0,4,8" TextWrapping="Wrap" Foreground="#52657A"/>
 <CheckBox x:Name="QueueReview" Content="Pause after channel discovery for review" IsChecked="True" Margin="8,4" ToolTip="Applied when Start is pressed. Discover all queued channels, then pause before downloading. Press Start again after reviewing."/>
-<WrapPanel><TextBlock Text="Est. publish date before" VerticalAlignment="Center" Margin="8,4"/><DatePicker x:Name="QueueBefore" Width="145" Margin="4"/><Button x:Name="QueueSelectBefore" Content="Select pending before date" ToolTip="Replace the selection with pending videos strictly before this date across all channels. Unknown dates stay unselected."/></WrapPanel>
+<WrapPanel><Button x:Name="QueueRemove" Content="Remove selected pending items"/><Button x:Name="QueueRetry" Content="Retry selected"/><Button x:Name="QueueUp" Content="Move up" ToolTip="Move one selected pending video earlier in download order."/><Button x:Name="QueueDown" Content="Move down" ToolTip="Move one selected pending video later in download order."/><TextBlock x:Name="QueueSelection" Margin="8,4" VerticalAlignment="Center"/></WrapPanel>
+<WrapPanel><Button x:Name="QueueClear" Content="Clear finished" ToolTip="Clean up completed, skipped, cancelled and failed rows. Pending/running work and captured files are preserved."/><Button x:Name="QueueClearAll" Content="Clear queue" ToolTip="Remove all queue rows except the current download, cancel channel discovery, and pause the queue. The current download may finish; captured files are preserved."/></WrapPanel>
+
+<Expander x:Name="QueueFilters" Header="Filters and selection" IsExpanded="False" Margin="4"><StackPanel><WrapPanel><TextBlock Text="Est. publish date before" VerticalAlignment="Center" Margin="8,4"/><DatePicker x:Name="QueueBefore" Width="145" Margin="4"/><Button x:Name="QueueSelectBefore" Content="Select pending before date" ToolTip="Replace the selection with pending videos strictly before this date across all channels. Unknown dates stay unselected."/></WrapPanel>
 <TextBlock Text="Dates may be approximate. Unknown dates stay unselected; capture updates dates when available." Foreground="#52657A" Margin="8,4" TextWrapping="Wrap"/>
-<WrapPanel><Button x:Name="QueueRemove" Content="Remove selected pending items"/><Button x:Name="QueueRetry" Content="Retry selected"/><Button x:Name="QueueClear" Content="Clear finished" ToolTip="Clean up completed, skipped, cancelled and failed rows. Pending/running work and captured files are preserved."/><Button x:Name="QueueClearAll" Content="Clear queue" ToolTip="Remove all queue rows except the current download, cancel channel discovery, and pause the queue. The current download may finish; captured files are preserved."/></WrapPanel>
-<TextBlock x:Name="QueueSelection" Margin="8,4"/>
+</StackPanel></Expander>
 </StackPanel>
+<StackPanel DockPanel.Dock="Bottom"><TextBlock x:Name="QueueStatus" Text="Queue paused" Margin="4" TextWrapping="Wrap"/>
 <Grid DockPanel.Dock="Bottom" Margin="4,10,4,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-<TextBlock Text="Shift-click selects a range. Clear queue keeps only the current download. Clear finished cleans up history." TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,20,0"/>
+<TextBlock Text="Lower queue order downloads first. Shift-click selects a range. Clear queue keeps the current download." TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,20,0"/>
 <Button x:Name="QueueToggle" Grid.Column="1" Content="Start" MinWidth="120" ToolTip="Start the entire queue. Queued channels are listed before video downloads."/>
-</Grid>
+</Grid></StackPanel>
 <q:QueueGrid x:Name="QueueGrid" Style="{StaticResource {x:Type DataGrid}}" SelectionMode="Extended" SelectionUnit="FullRow" AutoGenerateColumns="False" Margin="4" RowHeight="36" ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"><DataGrid.Columns>
+<DataGridTextColumn Header="Queue order" Binding="{Binding QueueOrder}" SortMemberPath="QueueOrder" Width="100"/>
 <DataGridTemplateColumn Header="Status" SortMemberPath="Status" Width="140"><DataGridTemplateColumn.CellTemplate><DataTemplate><StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4" ToolTip="{Binding Detail}"><Border Width="20" Height="20" CornerRadius="10" Background="{Binding StatusColor}" Margin="0,0,7,0"><TextBlock Text="{Binding StatusGlyph}" Foreground="White" FontFamily="Segoe UI Symbol" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="{Binding StatusLabel}" VerticalAlignment="Center"/></StackPanel></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
 <DataGridTextColumn Header="Video" Binding="{Binding Title}" Width="240"/>
 <DataGridTextColumn Header="Est. Publish Date" Binding="{Binding PublishedDateLabel}" SortMemberPath="EstPublishedDate" Width="140"/>
@@ -116,6 +119,18 @@
 <WrapPanel><Button x:Name="SaveStorage" Content="Save settings"/><Button x:Name="CancelStorage" Content="Cancel changes"/><Button x:Name="StorageRestart" Content="Restart to apply location" Visibility="Collapsed"/></WrapPanel>
 <TextBlock x:Name="StorageNotice" TextWrapping="Wrap" Margin="4"/>
 <WrapPanel Margin="0,12"><Button x:Name="OpenData" Content="Open data folder"/><Button x:Name="OpenConfig" Content="Open configuration"/></WrapPanel>
+</StackPanel></ScrollViewer></TabItem>
+<TabItem x:Name="AboutTab" Header="About"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="24" MaxWidth="800" HorizontalAlignment="Left">
+<Border Background="#094184" Padding="16" CornerRadius="6"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="200"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+<Image x:Name="CompanyLogo" Height="180" Stretch="Uniform" RenderOptions.BitmapScalingMode="HighQuality" AutomationProperties.Name="Columbia Cloudworks"/>
+<StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="16,0"><TextBlock Text="YT-OSINT" Foreground="White" FontFamily="Aptos Display, Segoe UI" FontSize="28" FontWeight="Bold" Margin="0,0,0,12"/>
+<TextBlock x:Name="AboutVersion" Foreground="White" Margin="0,0,0,12"/>
+<TextBlock Text="Published and owned by" Foreground="White"/><TextBlock Text="Columbia Cloudworks LLC" Foreground="White" FontWeight="SemiBold" TextWrapping="Wrap"/></StackPanel>
+</Grid></Border>
+<TextBlock Text="A Columbia Cloudworks OSINT product for collecting, organizing and searching a local YouTube corpus." Margin="4,12" TextWrapping="Wrap"/>
+<TextBlock Text="Copyright © 2026 Columbia Cloudworks LLC. All rights reserved." Margin="4,12" TextWrapping="Wrap"/>
+<TextBlock Text="Columbia Cloudworks branding belongs to Columbia Cloudworks LLC. Third-party tools retain their respective licenses. Captured content remains subject to its owners’ rights. This product is not affiliated with or endorsed by YouTube or Google." Margin="4" TextWrapping="Wrap"/>
+<Button x:Name="AboutRepository" Content="Project repository" HorizontalAlignment="Left" Margin="4,16"/>
 </StackPanel></ScrollViewer></TabItem>
 </TabControl></TabItem>
 </TabControl></DockPanel></Window>

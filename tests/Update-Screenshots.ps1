@@ -78,7 +78,9 @@ $check={
             $ui.DependencyNotice.Text='No update check has been run in this sample session. Check now loads installed and available versions.'
             $state.ScreenshotStage=6
         }
-        6 {Save-DocumentationScreenshot $window 'dependencies.png';$window.Close()}
+        6 {Save-DocumentationScreenshot $window 'dependencies.png';$ui.AboutTab.IsSelected=$true;$state.ScreenshotStage=7}
+        7 {Save-DocumentationScreenshot $window 'screenshots/about.png';$ui.QueueTab.IsSelected=$true;$ui.QueueFilters.IsExpanded=$true;$state.ScreenshotStage=8}
+        8 {Save-DocumentationScreenshot $window 'screenshots/queue-filters.png';$window.Close()}
     }
 }
 Show-CorpusWindow $fixtureRoot -SkipDependencies -SmokeTest -SmokeQueueCheck $check -UserSettingsPath (Join-Path $fixtureRoot 'fixture-settings.json')

@@ -13,9 +13,10 @@ powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-Unif
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-SelectionStorageIntegration.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-DiscoveryQueueIntegration.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-QueuePerformanceIntegration.ps1
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-QueueUxIntegration.ps1
 ```
 
-GitHub Actions runs syntax parsing, the fixture suite, and all seven WPF scripts on Windows (the performance script uses 12,000 rows in CI). Tests use `tests/fixtures/config.json`, not the user's live subject configuration. No YouTube requests are made by these checks.
+GitHub Actions runs syntax parsing, the fixture suite, and all eight WPF scripts on Windows (the performance script uses 12,000 rows in CI). Tests use `tests/fixtures/config.json`, not the user's live subject configuration. No YouTube requests are made by these checks.
 
 The fixture suite covers configuration and identity, atomic writes, concurrent subject updates, VTT normalization, subtitle selection, cached transcript reuse, searches, timestamp links, acquisition failures, members-only skips, Excel structure, run accounting, persistent rate-limit scheduling, dependency verification, rollback/recovery, and maintenance locks.
 
@@ -107,6 +108,14 @@ Local validation on 2026-09-27 for Clear queue: source parsing, all 154 fixture 
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Update-Screenshots.ps1
 ```
 
-This loads the actual application with isolated sample subjects, channels and queue states. It replaces `docs/screenshot.png`, `docs/dependencies.png`, and the Subjects, Channels, Queue, Discovery and Storage screenshots under `docs/screenshots/`. No live YouTube requests, dependency release checks, or personal configuration are used. The dependency page intentionally shows unqueried sample rows. Inspect the resulting images for clipping, stale controls, misleading status and private data before committing.
+This loads the actual application with isolated sample subjects, channels and queue states. It replaces `docs/screenshot.png`, `docs/dependencies.png`, and the Subjects, Channels, Queue, Discovery, Storage, About and expanded queue-filter screenshots under `docs/screenshots/`. No live YouTube requests, dependency release checks, or personal configuration are used. The dependency page intentionally shows unqueried sample rows. Inspect the resulting images for clipping, stale controls, misleading status and private data before committing.
 
 For this project, a request to make changes includes implementation, tests, all affected documentation, regeneration/review of all documented screenshots, and commit/push. See the repository's `AGENTS.md`.
+
+## Live queue ordering and publisher identity
+
+`QueueView.Tests.ps1` verifies numeric queue-order sorting, ascending and descending live status re-sorting, and selected-row identity retention. Queue storage fixtures verify persisted pending-only priority changes, boundary moves, active-row rejection, unchanged record identity and appending newly queued videos.
+
+`Invoke-QueueUxIntegration.ps1` opens the actual WPF application against an isolated fixture, checks collapsed/expanded filters and footer/selection placement, verifies the company image and version, changes priority while the first download is held open, and confirms the scheduler's actual acquisition order after release. Completed rows cannot be reprioritized. All acquisitions are simulated; storage, locks, workers and controls are real.
+
+Local validation on 2026-09-27 for live sorting, queue priority and About: final PowerShell source parsing, all **156 fixture tests**, and all **eight WPF integration scripts** passed in Windows PowerShell 5.1. Integrations were run sequentially. The 12,000-row performance fixture retained selection across updates and clearing, removed 3,000 pending rows together, and measured P95 extra dispatcher delay **26.2 ms**, maximum **409.2 ms**, column sort **50.4 ms**, and maximum apply slice **53.6 ms**, within the existing responsiveness budgets. Downloads used local adapters; live YouTube behavior was not tested. All nine documented application screenshots were regenerated from isolated fixture data and visually inspected.

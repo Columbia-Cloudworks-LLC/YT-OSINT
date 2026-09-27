@@ -51,6 +51,13 @@ namespace YouTubeCorpus
             args.Column.SortDirection = direction;
             ((ListCollectionView)CollectionViewSource.GetDefaultView(ItemsSource)).CustomSort = new RowComparer(sorts.ToArray());
         }
+        public void RefreshSort()
+        {
+            if (sorts.Count == 0 || ItemsSource == null) return;
+            var selected = new List<QueueRow>(); foreach (QueueRow row in SelectedItems) selected.Add(row);
+            CollectionViewSource.GetDefaultView(ItemsSource).Refresh();
+            SelectRows(selected.ToArray());
+        }
         private sealed class RowComparer : IComparer
         {
             private readonly SortDescription[] sorts;
@@ -79,7 +86,7 @@ namespace YouTubeCorpus
                         bool aUnknown = String.IsNullOrEmpty(a.EstPublishedDate), bUnknown = String.IsNullOrEmpty(b.EstPublishedDate);
                         if (aUnknown != bUnknown) return aUnknown ? 1 : -1;
                     }
-                    int result = culture.Compare(Value(a, sort.PropertyName), Value(b, sort.PropertyName), CompareOptions.None);
+                    int result = sort.PropertyName == "QueueOrder" ? a.QueueOrder.CompareTo(b.QueueOrder) : culture.Compare(Value(a, sort.PropertyName), Value(b, sort.PropertyName), CompareOptions.None);
                     if (result != 0) return sort.Direction == ListSortDirection.Ascending ? result : -result;
                 }
                 return StringComparer.Ordinal.Compare(a.Id, b.Id);
@@ -133,6 +140,7 @@ namespace YouTubeCorpus
     // The authoritative writer continues to preserve every persisted field.
     public sealed class QueueItemData
     {
+        public int QueueOrder { get; set; }
         public string EstPublishedDate { get; set; }
         public string Id { get; set; }
         public string VideoId { get; set; }
@@ -167,6 +175,7 @@ namespace YouTubeCorpus
     // Snapshot instances belong to the reader. Bound rows belong only to the dispatcher.
     public sealed class QueueRow : INotifyPropertyChanged
     {
+        public int QueueOrder { get; internal set; }
         public string EstPublishedDate { get; private set; }
         public string PublishedDateLabel { get { return String.IsNullOrEmpty(EstPublishedDate) ? "Unknown" : EstPublishedDate; } }
         public string Id { get; private set; }
@@ -189,6 +198,7 @@ namespace YouTubeCorpus
         public event PropertyChangedEventHandler PropertyChanged;
         public QueueRow(PSObject item)
         {
+            int order; QueueOrder = Int32.TryParse(Text(item, "QueueOrder"), out order) ? order : 0;
             EstPublishedDate = NormalizeDate(Text(item, "EstPublishedDate"));
             Id = Text(item, "Id"); VideoId = Text(item, "VideoId"); SubjectId = Text(item, "SubjectId");
             Title = Text(item, "Title"); SubjectName = Text(item, "SubjectName"); Url = Text(item, "Url");
@@ -196,6 +206,7 @@ namespace YouTubeCorpus
         }
         internal QueueRow(QueueItemData item)
         {
+            QueueOrder = item.QueueOrder;
             EstPublishedDate = NormalizeDate(item.EstPublishedDate);
             Id = item.Id ?? ""; VideoId = item.VideoId ?? ""; SubjectId = item.SubjectId ?? "";
             Title = item.Title ?? ""; SubjectName = item.SubjectName ?? ""; Url = item.Url ?? "";
@@ -213,11 +224,12 @@ namespace YouTubeCorpus
         }
         internal bool Same(QueueRow other)
         {
-            return EstPublishedDate == other.EstPublishedDate && Title == other.Title && SubjectName == other.SubjectName && Url == other.Url &&
+            return QueueOrder == other.QueueOrder && EstPublishedDate == other.EstPublishedDate && Title == other.Title && SubjectName == other.SubjectName && Url == other.Url &&
                 Detail == other.Detail && Status == other.Status && SubjectId == other.SubjectId && VideoId == other.VideoId;
         }
         internal void Update(QueueRow other)
         {
+            if (QueueOrder != other.QueueOrder) { QueueOrder = other.QueueOrder; Notify("QueueOrder"); }
             bool statusChanged = Status != other.Status;
             if (EstPublishedDate != other.EstPublishedDate) { EstPublishedDate = other.EstPublishedDate; Notify("EstPublishedDate"); Notify("PublishedDateLabel"); }
             if (Title != other.Title) { Title = other.Title; Notify("Title"); }
@@ -278,6 +290,7 @@ namespace YouTubeCorpus
         private QueueSnapshot() { }
         private void Add(QueueRow row, IEnumerable links, QueueSnapshot previous)
         {
+            if (row.QueueOrder <= 0) row.QueueOrder = rows.Count + 1;
             if (byId.ContainsKey(row.Id)) throw new InvalidOperationException("Duplicate queue item ID: " + row.Id);
             byId.Add(row.Id, row); rows.Add(row); Counts.Add(row.Status); Count(subjects, row.SubjectId, row.Status);
             foreach (object job in links) Count(jobs, Convert.ToString(job), row.Status);
@@ -378,7 +391,7 @@ namespace YouTubeCorpus
                     if (byId.TryGetValue(next.Id, out row)) row.Update(next);
                     else { row = next.Copy(); byId.Add(row.Id, row); Rows.Add(row); }
                 }
-                else { pending = null; break; }
+                else { if (grid != null && pending.Changed.Count > 0) grid.RefreshSort(); pending = null; break; }
                 operations++; AppliedChanges++;
             } while (operations < (bulkRemoval ? 8192 : 128) && clock.ElapsedMilliseconds < milliseconds);
             MaxSliceMilliseconds = Math.Max(MaxSliceMilliseconds, clock.Elapsed.TotalMilliseconds);

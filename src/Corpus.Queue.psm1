@@ -15,7 +15,10 @@ function Get-CorpusQueue {
     if(-not $queue.PSObject.Properties['SyncJobs']){$queue | Add-Member NoteProperty SyncJobs @()}
     if(-not $queue.PSObject.Properties['DiscoveryJobIds']){$queue | Add-Member NoteProperty DiscoveryJobIds @($queue.SyncJobs | Where-Object Status -in @('Pending','Discovering','Downloading','Cancelling') | ForEach-Object {$_.Id})}
     foreach($job in $queue.SyncJobs){if(-not $job.PSObject.Properties['ClearedResults']){$job | Add-Member NoteProperty ClearedResults ([pscustomobject]@{Completed=0;Skipped=0;Failed=0;Cancelled=0})}}
+    $order=0
     foreach($item in $queue.Items){
+        $order++
+        if(-not $item.PSObject.Properties['QueueOrder']){$item | Add-Member NoteProperty QueueOrder $order}
         if(-not $item.PSObject.Properties['JobIds']){$item | Add-Member NoteProperty JobIds @()}
         if(-not $item.PSObject.Properties['Batch']){$item | Add-Member NoteProperty Batch $true}
         if(-not $item.PSObject.Properties['ListingEntry']){$item | Add-Member NoteProperty ListingEntry $null}
@@ -63,6 +66,7 @@ function Add-CorpusQueueUrls {
         $queue=Get-CorpusQueue $Root;$config=Get-CorpusConfig $Root
         if($SubjectId -and -not @($config.subjects | Where-Object id -eq $SubjectId).Count){throw 'The selected subject no longer exists.'}
         if($JobId -and -not @($queue.SyncJobs | Where-Object {$_.Id -eq $JobId -and $_.Status -eq 'Discovering'}).Count){return [pscustomobject]@{Added=0;Duplicates=0}}
+        $nextOrder=0;foreach($existingItem in $queue.Items){$nextOrder=[Math]::Max($nextOrder,[int]$existingItem.QueueOrder)}
         $added=0;$duplicates=0;$seen=@{};$listingById=@{};$newItems=[Collections.Generic.List[object]]::new()
         foreach($listing in $ListingEntries){$listingById[$listing.id]=$listing}
         foreach($item in $queue.Items){if($item.Status -in @('Pending','Running')){$seen[$item.VideoId]=$item}}
@@ -78,8 +82,9 @@ function Add-CorpusQueueUrls {
             $effectiveId=if($archived){$archived.id}elseif($SubjectId){$SubjectId}elseif($video){$video.SubjectId}else{''}
             $subject=@((@($config.subjects)+@($config.archivedSubjects)) | Where-Object id -eq $effectiveId)
             if($effectiveId -and -not $subject.Count){throw 'A saved video references a missing subject. Select a subject explicitly.'}
+            $nextOrder++
             $newItem=[pscustomobject][ordered]@{
-                Id=[guid]::NewGuid().ToString('N');VideoId=$entry.Id;Url=$entry.Url
+                QueueOrder=$nextOrder;Id=[guid]::NewGuid().ToString('N');VideoId=$entry.Id;Url=$entry.Url
                 Title=$(if($video){$video.VideoTitle}else{Get-CorpusProperty $listingById[$entry.Id] title $entry.Id});SubjectId=$effectiveId;SubjectName=$(if($subject.Count){$subject[0].name}else{''})
                 Status='Pending';Detail='';AddedAt=[datetime]::UtcNow.ToString('o');StartedAt=$null;FinishedAt=$null
                 RefreshTranscript=[bool]$RefreshTranscript;ExportWorkbook=[bool]$ExportWorkbook
@@ -116,7 +121,7 @@ function Remove-CorpusQueueItems {
     } finally {$lock.Dispose()}
 }
 function Update-CorpusQueue {
-    param([string]$Root,[ValidateSet('Pause','Remove','Retry','ClearFinished','ClearQueue')][string]$Action,[string]$Id='',$RunnerShared=$null)
+    param([string]$Root,[ValidateSet('Pause','Remove','Retry','ClearFinished','ClearQueue','MoveUp','MoveDown')][string]$Action,[string]$Id='',$RunnerShared=$null)
     $lock=Enter-CorpusConfigLock $Root
     try {
         $queue=Get-CorpusQueue $Root
@@ -149,7 +154,13 @@ function Update-CorpusQueue {
         else {
             $matches=@($queue.Items | Where-Object Id -eq $Id)
             if(-not $matches.Count){throw 'This queue item no longer exists.'};$item=$matches[0]
-            if($Action -eq 'Remove'){
+            if($Action -in @('MoveUp','MoveDown')){
+                if($item.Status -ne 'Pending'){throw 'Only pending items can change priority.'}
+                $pending=@($queue.Items | Where-Object Status -eq Pending | Sort-Object QueueOrder)
+                $index=[array]::IndexOf($pending,$item)
+                $target=if($Action -eq 'MoveUp'){$index-1}else{$index+1}
+                if($target -ge 0 -and $target -lt $pending.Count){$order=$item.QueueOrder;$item.QueueOrder=$pending[$target].QueueOrder;$pending[$target].QueueOrder=$order}
+            } elseif($Action -eq 'Remove'){
                 if($item.Status -ne 'Pending'){throw 'Only pending items can be removed.'}
                 foreach($job in $queue.SyncJobs){if($job.Id -in $item.JobIds){$job | Add-Member NoteProperty PartialImport $true -Force}}
                 if(@($item.JobIds).Count){$item.Status='Cancelled';$item.Detail='Removed before download';$item.FinishedAt=[datetime]::UtcNow.ToString('o')}else{$queue.Items=@($queue.Items | Where-Object Id -ne $Id)}
@@ -159,7 +170,7 @@ function Update-CorpusQueue {
                 $subject=@((Get-CorpusConfig $Root).subjects | Where-Object id -eq $item.SubjectId)
                 if($item.SubjectId -and -not $subject.Count){throw 'The subject no longer exists. Add the URL again with a current subject.'}
                 $activeJobs=@($queue.SyncJobs | Where-Object {$_.Id -in $item.JobIds -and $_.Status -in @('Pending','Discovering','Downloading','Cancelling')})
-                if($activeJobs.Count){$item=$item | Select-Object *;$item.Id=[guid]::NewGuid().ToString('N');$item.AddedAt=[datetime]::UtcNow.ToString('o');$queue.Items=@($queue.Items)+$item}
+                if($activeJobs.Count){$item=$item | Select-Object *;$item.Id=[guid]::NewGuid().ToString('N');$item.QueueOrder=1+[int](($queue.Items | Measure-Object QueueOrder -Maximum).Maximum);$item.AddedAt=[datetime]::UtcNow.ToString('o');$queue.Items=@($queue.Items)+$item}
                 $item.SubjectName=if($subject.Count){$subject[0].name}else{''}
                 $item.Status='Pending';$item.Detail='';$item.StartedAt=$null;$item.FinishedAt=$null;$item.JobIds=@();$item.Batch=$true
             }
@@ -187,7 +198,7 @@ function Invoke-CorpusQueue {
             try {
                 $queue=Get-CorpusQueue $Root
                 if($queue.Paused -or ($Shared -and $Shared.Cancel)){break}
-                $pending=@($queue.Items | Where-Object Status -eq Pending | Select-Object -First 1)
+                $pending=@($queue.Items | Where-Object Status -eq Pending | Sort-Object QueueOrder | Select-Object -First 1)
                 $discover=$null
                 $jobs=@($queue.SyncJobs | Where-Object Status -eq Pending | Select-Object -First 1)
                 if($jobs.Count){

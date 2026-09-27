@@ -5,6 +5,23 @@ Describe 'Persistent batch queue and subject protection' {
         $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));$ctx=New-CorpusContext $root
         Copy-Item (Join-Path $PSScriptRoot fixtures/config.json) (Join-Path $root config.json)
     }
+    It 'persists priority changes for pending items without moving running work or changing record identity' {
+        $null=Add-CorpusQueueUrls $root "https://youtu.be/abcDEF12_-3`nhttps://youtu.be/xyzDEF12_-3`nhttps://youtu.be/newDEF12_-3" mo
+        $q=Get-CorpusQueue $root;$ids=@($q.Items | ForEach-Object Id)
+        $q.Items[0].Status='Running';Write-CorpusJson (Join-Path $root data/queue.json) $q
+        Update-CorpusQueue $root MoveUp $ids[2]
+        $q=Get-CorpusQueue $root
+        (@($q.Items | Where-Object Status -eq Pending | Sort-Object QueueOrder | ForEach-Object Id) -join ',') | Should Be ($ids[2]+','+$ids[1])
+        ($q.Items.Id -join ',') | Should Be ($ids -join ',')
+        $q.Items[0].Status | Should Be Running
+        {Update-CorpusQueue $root MoveUp $ids[0]} | Should Throw
+        Update-CorpusQueue $root MoveDown $ids[2]
+        $q=Get-CorpusQueue $root;($q.Items.QueueOrder -join ',') | Should Be '1,2,3'
+        Update-CorpusQueue $root MoveDown $ids[2]
+        ((Get-CorpusQueue $root).Items.QueueOrder -join ',') | Should Be '1,2,3'
+        $null=Add-CorpusQueueUrls $root 'https://youtu.be/endDEF12_-3' mo
+        (Get-CorpusQueue $root).Items[3].QueueOrder | Should Be 4
+    }
     It 'normalizes URL variants and skips duplicate video IDs without sending network requests' {
         $r=Add-CorpusQueueUrls $root "https://youtu.be/abcDEF12_-3`nhttps://www.youtube.com/watch?v=abcDEF12_-3&t=20`nhttps://youtube.com/shorts/xyzDEF12_-3" mo
         $r.Added | Should Be 2;$r.Duplicates | Should Be 1

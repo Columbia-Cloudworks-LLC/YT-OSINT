@@ -44,12 +44,16 @@ function Show-CorpusWindow {
     foreach($entry in @{OpenTranscript='Transcript';OpenResult='YouTube';OpenWorkbook='Excel';Build='Export';QueueToggle='Play';QueueRemove='Remove';QueueRetry='Retry';QueueClear='Broom';QueueClearAll='Clear';SyncSelected='Retry';SyncAll='Retry';CancelSync='Remove'}.GetEnumerator()){Set-CorpusButtonIcon $ui[$entry.Key] $entry.Value}
     $state=@{Worker=$null;Handle=$null;Shared=$null;Operation='';Snapshot=$null;Ready=[bool]$SkipDependencies;Closing=$false;PendingSubject='';SmokeTicks=0;LastOutcome='Ready';CheckedStartup=(([bool]$SkipDependencies -or [bool]$SmokeTest) -and -not $SmokeCheckDependencies);RestartRequired=$false;RestartTicket=$null;DependencyRows=@();SmokeStage=0;ViewerVerified=$false;SmokeError='';QueueWorker=$null;QueueHandle=$null;QueueShared=$null;Queue=[pscustomobject]@{Paused=$true;Items=@();SyncJobs=@()};QueueStamp='';SelectCreatedSubject=$false;RestoringQueue=$false;QueueTicks=0;NeedsRefresh=$false;QueueReader=$null;QueueReadHandle=$null;QueueSnapshot=$null;QueueNext=$null;QueueReadRequested=$true;QueueInitialized=$false;QueueView=[YouTubeCorpus.QueueView]::new();QueueSelectionDirty=$true}
     $ui.QueueGrid.ItemsSource=$state.QueueView.Rows
+    $ui.QueueGrid.SortColumn(@($ui.QueueGrid.Columns | Where-Object SortMemberPath -eq QueueOrder)[0])
     $artwork=Join-Path $appRoot 'docs/yt-osint-header-bg.png'
     if(Test-Path -LiteralPath $artwork){
         $bitmap=[Windows.Media.Imaging.BitmapImage]::new();$bitmap.BeginInit();$bitmap.CacheOption=[Windows.Media.Imaging.BitmapCacheOption]::OnLoad;$bitmap.UriSource=[uri]$artwork;$bitmap.EndInit();$bitmap.Freeze();$ui.HeaderArtwork.Source=$bitmap
     }
+    $ui.CompanyLogo.Source=[Windows.Media.Imaging.BitmapImage]::new([uri](Join-Path $appRoot 'assets/columbia-cloudworks-logo.png'))
+    $ui.AboutVersion.Text='Version '+(Get-Content (Join-Path $appRoot 'VERSION') -Raw).Trim()+' · Windows desktop'
+    $ui.AboutRepository.Add_Click({Start-Process 'https://github.com/Columbia-Cloudworks-LLC/YT-OSINT'})
     $state.CleanupTasks=[Collections.Generic.List[Threading.Tasks.Task]]::new()
-    $mutators=@('CreateSubject','RemoveSubject','RenameSubject','AddChannel','RemoveChannel','SyncSelected','SyncAll','Refresh','CancelSync','ImportVideo','Build','Search','FilterCorpus','RefreshChannelTranscripts','RefreshVideoTranscript','OpenTranscript','AutoExport','QueueToggle','QueueRemove','QueueRetry','QueueClear','QueueClearAll')
+    $mutators=@('CreateSubject','RemoveSubject','RenameSubject','AddChannel','RemoveChannel','SyncSelected','SyncAll','Refresh','CancelSync','ImportVideo','Build','Search','FilterCorpus','RefreshChannelTranscripts','RefreshVideoTranscript','OpenTranscript','AutoExport','QueueToggle','QueueUp','QueueDown','QueueRemove','QueueRetry','QueueClear','QueueClearAll')
     $ui.Paths.Text="Current corpus folder: $Root`nWorkbook: $(Join-Path $Root 'output/YouTubeCorpus.xlsx')`nSource configuration: $(Join-Path $Root 'config.json')`nNative dependencies: $(Get-CorpusNativeRoot)"
     $state.Preferences=Get-CorpusUserSettings $UserSettingsPath
     $state.RestartRoot=$Root
@@ -107,6 +111,8 @@ function Show-CorpusWindow {
         $selected=$ui.QueueGrid.SelectedItem
         $pendingSelected=[YouTubeCorpus.QueueView]::PendingSelected($ui.QueueGrid.SelectedItems)
         $ui.QueueSelection.Text="$($ui.QueueGrid.SelectedItems.Count) selected · $pendingSelected pending"
+        $canMove=$available -and $ui.QueueGrid.SelectedItems.Count -eq 1 -and $pendingSelected -eq 1
+        $ui.QueueUp.IsEnabled=$canMove;$ui.QueueDown.IsEnabled=$canMove
         $ui.QueueRemove.IsEnabled=($available -and $pendingSelected -gt 0)
         $ui.QueueSelectBefore.IsEnabled=($available -and $null -ne $ui.QueueBefore.SelectedDate)
         $ui.QueueReview.IsEnabled=($available -and -not $state.QueueWorker)
@@ -354,6 +360,8 @@ function Show-CorpusWindow {
         try{$ui.QueueGrid.SelectPendingBefore($ui.QueueBefore.SelectedDate)}finally{$state.RestoringQueue=$false}
         Update-QueueButtons
     })
+    $ui.QueueUp.Add_Click({if($ui.QueueGrid.SelectedItem){Start-Work 'QueueAction' @{Action='MoveUp';Id=$ui.QueueGrid.SelectedItem.Id}}})
+    $ui.QueueDown.Add_Click({if($ui.QueueGrid.SelectedItem){Start-Work 'QueueAction' @{Action='MoveDown';Id=$ui.QueueGrid.SelectedItem.Id}}})
     $ui.QueueRetry.Add_Click({if($ui.QueueGrid.SelectedItem){Start-Work 'QueueAction' @{Action='Retry';Id=$ui.QueueGrid.SelectedItem.Id}}})
     $ui.QueueClear.Add_Click({Start-Work 'QueueAction' @{Action='ClearFinished';Id=''}})
     $ui.QueueClearAll.Add_Click({Start-Work 'QueueAction' @{Action='ClearQueue';Id='';RunnerShared=$state.QueueShared}})

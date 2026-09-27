@@ -211,7 +211,7 @@ Install-Module Pester -RequiredVersion 4.10.1 -Scope CurrentUser
 .\tests\Run-Tests.ps1
 ```
 
-The deterministic suite uses local metadata/VTT fixtures; it does not access YouTube or install native dependencies. It covers configuration, relationships, identifiers, parser edge cases, rolling captions, timestamp links, repeated acquisition via a mocked external adapter, raw deduplication/history, failure persistence and continuation, search context, process output, cancellation/run records, and real XLSX content/locking. The queue tests also cover deduplication, atomic validation, subject locks, concurrent configuration writers, pause/cancel/retry/recovery, rate-limit halting, cached imports under the queue writer lock, and incremental row updates. GitHub Actions runs the suite and seven WPF integration scripts on Windows, including a 12,000-row performance fixture.
+The deterministic suite uses local metadata/VTT fixtures; it does not access YouTube or install native dependencies. It covers configuration, relationships, identifiers, parser edge cases, rolling captions, timestamp links, repeated acquisition via a mocked external adapter, raw deduplication/history, failure persistence and continuation, search context, process output, cancellation/run records, and real XLSX content/locking. The queue tests also cover deduplication, atomic validation, subject locks, concurrent configuration writers, pause/cancel/retry/recovery, rate-limit halting, cached imports under the queue writer lock, and incremental row updates. GitHub Actions runs the suite and eight WPF integration scripts on Windows, including a 12,000-row performance fixture.
 
 Actual WPF interaction tests (local fixtures; no YouTube requests):
 
@@ -223,6 +223,7 @@ powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-Unif
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-SelectionStorageIntegration.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-DiscoveryQueueIntegration.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-QueuePerformanceIntegration.ps1
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-QueueUxIntegration.ps1
 ```
 
 The unified integration test verifies subject sorting, persistent channel labels, selecting/enqueueing a second channel during a download, batch/sync deduplication, cancellation, and channel unlock. The discovery integration also checks the discovery barrier, Start/Pause/Pausing states, colored badges, clearing every terminal state during active work, and retained partial-sync results. The storage integration checks selection retention, profile settings, relocation and restart.
@@ -275,3 +276,13 @@ powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\YouTubeCorpus.ps1
 - **Full Windows acceptance remains manual:** interactive browser playback, very large batches, disk exhaustion, and crash/power-loss fault injection beyond the tested recovery cases remain manual checks. Do not equate passing offline tests with those checks.
 
 This is an evidence retrieval utility. It does not label statements true, false, contradictory, hypocritical, or misleading.
+
+## Publisher and About
+
+YT-OSINT is published and owned by **Columbia Cloudworks LLC**. Settings → About displays the bundled company branding, application version from `VERSION`, ownership and rights information, and a link to the [project repository](https://github.com/Columbia-Cloudworks-LLC/YT-OSINT). Version `0.1.0` establishes the application's version metadata. Third-party dependencies retain their own licenses, and captured content retains its owners’ rights.
+
+![About](docs/screenshots/about.png)
+
+The planned OSINT product family will share branding and interaction patterns, with a future platform intended to ingest their corpora. That unified ingestion platform is not implemented here. Brand provenance and reuse details are recorded in [BRANDING.md](docs/BRANDING.md).
+
+The queue defaults to sortable numeric **Queue order**. Select one pending video and use **Move up** or **Move down** to change its saved download priority. Display sorting remains independent, and changed rows are re-sorted live without losing selection. **Filters and selection** is collapsed immediately above the table; expand it to select pending videos before an estimated publication date. Statistics appear below the table, and selection counts appear beside the selected-item actions. See the [queue guide](docs/QUEUE.md).

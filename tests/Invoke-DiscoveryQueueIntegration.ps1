@@ -74,7 +74,7 @@ $check={
             if($ui.QueueGrid.Items[0].VideoId -ne 'abcDEF12_-3' -or $ui.QueueGrid.Items[2].PublishedDateLabel -ne 'Unknown'){throw 'Ascending date sort is incorrect'}
             $ui.QueueGrid.SortColumn($column)
             if($ui.QueueGrid.Items[0].VideoId -ne 'xyzDEF12_-3' -or $ui.QueueGrid.Items[2].PublishedDateLabel -ne 'Unknown'){throw 'Descending date sort is incorrect'}
-            $ui.QueueBefore.SelectedDate=[datetime]'2024-01-01';Click $ui.QueueSelectBefore
+            $ui.QueueFilters.IsExpanded=$true;$ui.QueueBefore.SelectedDate=[datetime]'2024-01-01';Click $ui.QueueSelectBefore
             if($ui.QueueGrid.SelectedItems.Count -ne 1 -or $ui.QueueGrid.SelectedItem.VideoId -ne 'abcDEF12_-3' -or -not $ui.QueueRemove.IsEnabled){throw 'Date cutoff did not select only the old pending video'}
             Click $ui.QueueToggle;$state.DiscoveryTestStage=4
         }

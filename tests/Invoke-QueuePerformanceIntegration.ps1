@@ -80,7 +80,7 @@ function script:Invoke-CorpusOperation {
                 $test.Source=$ui.QueueGrid.ItemsSource;$test.Row=$state.QueueView.Rows[1];$test.Corpus=$state.Snapshot
                 $null=$ui.QueueGrid.SelectedItems.Add($test.Row)
                 $watch=[Diagnostics.Stopwatch]::StartNew()
-                $column=$ui.QueueGrid.Columns[1];$column.SortDirection=[ComponentModel.ListSortDirection]::Ascending
+                $column=@($ui.QueueGrid.Columns | Where-Object SortMemberPath -eq Title)[0];$column.SortDirection=[ComponentModel.ListSortDirection]::Ascending
                 $ui.QueueGrid.SortColumn($column)
                 $test.SortMs=$watch.Elapsed.TotalMilliseconds
                 if($ui.QueueGrid.Items[0].Id -ne ('v'+($size-1).ToString('0000000000'))){throw 'Queue sort failed'}

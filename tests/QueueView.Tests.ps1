@@ -4,6 +4,27 @@ if(-not ('YouTubeCorpus.QueueView' -as [type])){Add-Type -Path (Join-Path $proje
 function New-ViewFixture($rows){[pscustomobject]@{Items=@($rows);Paused=$true;SyncJobs=@()}}
 function New-ViewRow([string]$id,[string]$status='Pending') {[pscustomobject]@{Id=$id;VideoId=$id;SubjectId='subject';SubjectName='Subject';Title=$id;Url='https://youtu.be/'+$id;Detail='';Status=$status;JobIds=@('shared')}}
 Describe 'Incremental queue view' {
+    It 're-sorts changed statuses and numeric priorities while retaining selected row identities' {
+        $a=New-ViewRow a;$b=New-ViewRow b;$c=New-ViewRow c
+        $a | Add-Member NoteProperty QueueOrder 10;$b | Add-Member NoteProperty QueueOrder 2;$c | Add-Member NoteProperty QueueOrder 1
+        $first=[YouTubeCorpus.QueueSnapshot]::new((New-ViewFixture @($a,$b,$c)),[pscustomobject]@{},'1',$null)
+        $view=[YouTubeCorpus.QueueView]::new();$view.Begin($first);while(-not $view.ApplySlice(4)){}
+        $grid=[YouTubeCorpus.QueueGrid]::new();$grid.SelectionMode='Extended';$grid.AutoGenerateColumns=$false;$grid.ItemsSource=$view.Rows
+        $order=[Windows.Controls.DataGridTextColumn]::new();$order.SortMemberPath='QueueOrder';$grid.Columns.Add($order)
+        $status=[Windows.Controls.DataGridTextColumn]::new();$status.SortMemberPath='Status';$grid.Columns.Add($status)
+        $grid.SortColumn($order);(@($grid.Items | ForEach-Object Id) -join ',') | Should Be 'c,b,a'
+        $grid.SortColumn($order);(@($grid.Items | ForEach-Object Id) -join ',') | Should Be 'a,b,c'
+        $selected=$view.Rows[2];$grid.SelectedItem=$selected
+        $grid.SortColumn($status);$c.Status='Completed'
+        $next=[YouTubeCorpus.QueueSnapshot]::new((New-ViewFixture @($a,$b,$c)),[pscustomobject]@{},'2',$first)
+        $view.Begin($next);while(-not $view.ApplySlice(4,$grid)){}
+        (@($grid.Items | ForEach-Object Id) -join ',') | Should Be 'c,a,b'
+        [object]::ReferenceEquals($grid.SelectedItem,$selected) | Should Be $true
+        $grid.SortColumn($status);$b.Status='Running'
+        $view.Begin([YouTubeCorpus.QueueSnapshot]::new((New-ViewFixture @($a,$b,$c)),[pscustomobject]@{},'3',$next));while(-not $view.ApplySlice(4,$grid)){}
+        (@($grid.Items | ForEach-Object Id) -join ',') | Should Be 'b,a,c'
+        [object]::ReferenceEquals($grid.SelectedItem,$selected) | Should Be $true
+    }
     It 'sorts dates chronologically with unknowns last and selects only pending dates strictly before the cutoff' {
         $rows=@(New-ViewRow a;New-ViewRow b;New-ViewRow c;New-ViewRow d Completed;New-ViewRow e;New-ViewRow f)
         $dates=@('2024-01-01','2022-12-31','','2021-01-01','2023-01-01','2023-99-99')
