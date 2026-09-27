@@ -1,6 +1,7 @@
 ﻿Set-StrictMode -Version 2
 Import-Module (Join-Path $PSScriptRoot 'Corpus.Viewer.psm1') -Force -Global
 Import-Module (Join-Path $PSScriptRoot 'Corpus.Queue.psm1') -Force -Global
+Import-Module (Join-Path $PSScriptRoot 'Corpus.Icons.psm1') -Force -Global
 function Start-CorpusRestart {
     param([string]$Root,[switch]$SmokeTest)
     $signal=Join-Path $Root ('logs/restart-'+[guid]::NewGuid().ToString('N')+'.ready')
@@ -25,6 +26,7 @@ function Show-CorpusWindow {
         $name=$node.GetAttribute('Name','http://schemas.microsoft.com/winfx/2006/xaml')
         $ui[$name]=$window.FindName($name)
     }
+    foreach($entry in @{OpenTranscript='Transcript';OpenResult='YouTube';OpenWorkbook='Excel';Build='Export'}.GetEnumerator()){Set-CorpusButtonIcon $ui[$entry.Key] $entry.Value}
     $state=@{Worker=$null;Handle=$null;Shared=$null;Operation='';Snapshot=$null;Ready=[bool]$SkipDependencies;Closing=$false;PendingSubject='';SmokeTicks=0;LastOutcome='Ready';CheckedStartup=(([bool]$SkipDependencies -or [bool]$SmokeTest) -and -not $SmokeCheckDependencies);RestartRequired=$false;RestartTicket=$null;DependencyRows=@();SmokeStage=0;ViewerVerified=$false;SmokeError='';QueueWorker=$null;QueueHandle=$null;QueueShared=$null;Queue=(Initialize-CorpusQueue $Root);QueueStamp='';QueueTicks=0;NeedsRefresh=$false}
     $mutators=@('CreateSubject','RenameSubject','AddChannel','RemoveChannel','SyncSelected','SyncAll','Refresh','CreateVideoSubject','ImportVideo','Build','Search','FilterCorpus','RefreshChannelTranscripts','RefreshVideoTranscript','OpenTranscript','AutoExport','QueueStart','QueuePause','QueueRemove','QueueRetry','QueueClear')
     $ui.Paths.Text="Application and corpus root: $Root`nWorkbook: $(Join-Path $Root 'output/YouTubeCorpus.xlsx')`nSource configuration: $(Join-Path $Root 'config.json')`nNative dependencies: $(Get-CorpusNativeRoot)"

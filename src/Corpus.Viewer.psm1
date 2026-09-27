@@ -1,4 +1,5 @@
 ﻿Set-StrictMode -Version 2
+Import-Module (Join-Path $PSScriptRoot 'Corpus.Icons.psm1') -Force -Global
 function Initialize-CorpusViewer {
     Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase
     if(-not ('YouTubeCorpus.HighlightTextBlock' -as [type])) {
@@ -37,6 +38,7 @@ function Show-CorpusTranscriptWindow {
     $window=[Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($layout))
     if($Owner){$window.Owner=$Owner}
     $ui=@{};foreach($name in @('VideoTitle','VideoDetail','FindText','Previous','Next','OnlyMatches','Count','Segments','OpenSource')){$ui[$name]=$window.FindName($name)}
+    Set-CorpusButtonIcon $ui.OpenSource YouTube
     $ui.VideoTitle.Text=$Video.VideoTitle
     $window.Title='Transcript | '+$Video.VideoTitle
     $ui.VideoDetail.Text="$($Video.ChannelName) | $($Video.VideoId) | $($Rows.Count) timestamped segments"

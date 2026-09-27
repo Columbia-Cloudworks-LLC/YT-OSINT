@@ -1,0 +1,35 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <!-- Local vector marks: no font, bitmap scaling, or network dependency. -->
+  <DrawingImage x:Key="YouTube">
+    <DrawingImage.Drawing><DrawingGroup>
+      <GeometryDrawing Brush="#FF0033"><GeometryDrawing.Geometry><RectangleGeometry Rect="1,5,22,14" RadiusX="4" RadiusY="4"/></GeometryDrawing.Geometry></GeometryDrawing>
+      <GeometryDrawing Brush="White" Geometry="M 10,9 L 16,12 L 10,15 Z"/>
+    </DrawingGroup></DrawingImage.Drawing>
+  </DrawingImage>
+  <DrawingImage x:Key="Excel">
+    <DrawingImage.Drawing><DrawingGroup>
+      <GeometryDrawing Brush="#107C41"><GeometryDrawing.Geometry><RectangleGeometry Rect="7,2,15,20" RadiusX="1.5" RadiusY="1.5"/></GeometryDrawing.Geometry></GeometryDrawing>
+      <GeometryDrawing Brush="#21A366" Geometry="M 8,3 H 21 V 8 H 8 Z"/>
+      <GeometryDrawing Brush="#33C481" Geometry="M 15,3 H 21 V 8 H 15 Z"/>
+      <GeometryDrawing Brush="#185C37"><GeometryDrawing.Geometry><RectangleGeometry Rect="1,6,13,13" RadiusX="1" RadiusY="1"/></GeometryDrawing.Geometry></GeometryDrawing>
+      <GeometryDrawing Brush="White" Geometry="M 4,9 H 6 L 7.5,11.3 L 9,9 H 11 L 8.6,12.5 L 11,16 H 9 L 7.5,13.7 L 6,16 H 4 L 6.4,12.5 Z"/>
+    </DrawingGroup></DrawingImage.Drawing>
+  </DrawingImage>
+  <DrawingImage x:Key="Transcript">
+    <DrawingImage.Drawing><DrawingGroup>
+      <GeometryDrawing Brush="#EFF5FC" Geometry="M 4,1 H 15 L 21,7 V 23 H 4 Z">
+        <GeometryDrawing.Pen><Pen Brush="#365D85" Thickness="1.5" LineJoin="Round"/></GeometryDrawing.Pen>
+      </GeometryDrawing>
+      <GeometryDrawing Geometry="M 15,1 V 7 H 21 M 7,11 H 9 M 12,11 H 18 M 7,15 H 9 M 12,15 H 18 M 7,19 H 9 M 12,19 H 18">
+        <GeometryDrawing.Pen><Pen Brush="#365D85" Thickness="1.5" StartLineCap="Round" EndLineCap="Round"/></GeometryDrawing.Pen>
+      </GeometryDrawing>
+    </DrawingGroup></DrawingImage.Drawing>
+  </DrawingImage>
+  <DrawingImage x:Key="Export">
+    <DrawingImage.Drawing><DrawingGroup>
+      <GeometryDrawing Brush="#EDF8F1"><GeometryDrawing.Geometry><RectangleGeometry Rect="2,2,16,20" RadiusX="1" RadiusY="1"/></GeometryDrawing.Geometry><GeometryDrawing.Pen><Pen Brush="#217346" Thickness="1.5"/></GeometryDrawing.Pen></GeometryDrawing>
+      <GeometryDrawing Geometry="M 2,8 H 18 M 2,13 H 12 M 2,18 H 12 M 8,8 V 22"><GeometryDrawing.Pen><Pen Brush="#217346" Thickness="1.2"/></GeometryDrawing.Pen></GeometryDrawing>
+      <GeometryDrawing Brush="#217346" Geometry="M 12,14 H 18 V 11 L 24,16.5 L 18,22 V 19 H 12 Z"/>
+    </DrawingGroup></DrawingImage.Drawing>
+  </DrawingImage>
+</ResourceDictionary>
