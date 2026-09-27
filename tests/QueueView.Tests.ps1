@@ -4,6 +4,22 @@ if(-not ('YouTubeCorpus.QueueView' -as [type])){Add-Type -Path (Join-Path $proje
 function New-ViewFixture($rows){[pscustomobject]@{Items=@($rows);Paused=$true;SyncJobs=@()}}
 function New-ViewRow([string]$id,[string]$status='Pending') {[pscustomobject]@{Id=$id;VideoId=$id;SubjectId='subject';SubjectName='Subject';Title=$id;Url='https://youtu.be/'+$id;Detail='';Status=$status;JobIds=@('shared')}}
 Describe 'Incremental queue view' {
+    It 'sorts dates chronologically with unknowns last and selects only pending dates strictly before the cutoff' {
+        $rows=@(New-ViewRow a;New-ViewRow b;New-ViewRow c;New-ViewRow d Completed;New-ViewRow e;New-ViewRow f)
+        $dates=@('2024-01-01','2022-12-31','','2021-01-01','2023-01-01','2023-99-99')
+        for($i=0;$i -lt $rows.Count;$i++){$rows[$i] | Add-Member NoteProperty EstPublishedDate $dates[$i]}
+        $view=[YouTubeCorpus.QueueView]::new();$view.Begin([YouTubeCorpus.QueueSnapshot]::new((New-ViewFixture $rows),[pscustomobject]@{},'1',$null));while(-not $view.ApplySlice(4)){}
+        $grid=[YouTubeCorpus.QueueGrid]::new();$grid.SelectionMode='Extended';$grid.AutoGenerateColumns=$false;$grid.ItemsSource=$view.Rows
+        $column=[Windows.Controls.DataGridTextColumn]::new();$column.SortMemberPath='EstPublishedDate';$grid.Columns.Add($column)
+        $grid.SortColumn($column);(@($grid.Items | ForEach-Object Id) -join ',') | Should Be 'd,b,e,a,c,f'
+        $grid.SortColumn($column);(@($grid.Items | ForEach-Object Id) -join ',') | Should Be 'a,e,b,d,c,f'
+        $grid.SelectedItem=$view.Rows[0];$grid.SelectPendingBefore([datetime]'2023-01-01')
+        $grid.SelectedItems.Count | Should Be 1;$grid.SelectedItem.Id | Should Be b
+        $view.Rows[2].PublishedDateLabel | Should Be Unknown;$view.Rows[5].PublishedDateLabel | Should Be Unknown
+        $row=$view.Rows[1];$rows[1].EstPublishedDate='2023-02-03'
+        $view.Begin([YouTubeCorpus.QueueSnapshot]::new((New-ViewFixture $rows),[pscustomobject]@{},'2',$null));while(-not $view.ApplySlice(4)){}
+        [object]::ReferenceEquals($row,$view.Rows[1]) | Should Be $true;$row.PublishedDateLabel | Should Be '2023-02-03'
+    }
     It 'sorts through the grid header handler and retains selection and row identity' {
         $rows=@(New-ViewRow z;New-ViewRow a;New-ViewRow m)
         $snapshot=[YouTubeCorpus.QueueSnapshot]::new((New-ViewFixture $rows),[pscustomobject]@{},'1',$null)

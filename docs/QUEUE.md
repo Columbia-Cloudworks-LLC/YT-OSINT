@@ -20,6 +20,14 @@ Each job and video stores stable subject IDs. Changing UI selection never reassi
 
 ## Manage work
 
+### Review older videos before capture
+
+**Pause after channel discovery for review** is checked by default each time the window opens. The choice applies when Start is pressed and cannot be changed while that worker is running. Start lists every queued channel, then pauses before claiming a video. Sort **Est. Publish Date** oldest-first or newest-first, review the list, and press Start again to capture the remaining videos. Adding more channels and starting again discovers those channels and pauses for another review. Uncheck the option before starting for uninterrupted discovery and downloads. Batch-only work without new channel discovery starts normally.
+
+Discovery uses yt-dlp's `youtubetab:approximate_date` option. Dates are estimates from the fast listing, displayed as `YYYY-MM-DD`; unavailable or invalid dates display **Unknown** and sort last in both directions. No per-video metadata requests are added during discovery. Cached or subsequently captured publication dates replace estimates when available, under the same **Est. Publish Date** heading. Precise dates remain available in captured corpus metadata. Estimates are suitable for pruning clearly older material, not precise date-boundary decisions. See [yt-dlp's extractor documentation](https://github.com/yt-dlp/yt-dlp#youtubetab-youtube-playlists-channels-feeds-etc).
+
+Choose a date and press **Select pending before date** to replace the selection with pending videos strictly before that date across all channels. Videos on the cutoff date, unknown dates, and running/finished videos stay unselected. Review the selection count, then use **Remove selected pending items**. This marks affected channel attempts partial; it does not delete captured files. Clearing cancelled rows preserves the partial result. The cutoff selects rows for this attempt; it is not a saved exclusion rule, and a future channel sync can re-add them. Sorting changes the display order only, not download order.
+
 | Control | Behavior |
 |---|---|
 | ▶ Start / ⏸ Pause | One button at the bottom right controls the entire list. Start discovers all queued channels before downloading videos. Pause finishes the active discovery/download safely, displays disabled **Pausing…**, and starts nothing else. Once idle, the button says Start; it is disabled when no work remains. |

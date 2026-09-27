@@ -1,10 +1,17 @@
 ﻿Set-StrictMode -Version 2
+function ConvertTo-CorpusQueueDate {
+    param([string]$Value)
+    $date=[datetime]::MinValue
+    if([datetime]::TryParseExact($Value,[string[]]@('yyyyMMdd','yyyy-MM-dd'),[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::None,[ref]$date)){return $date.ToString('yyyy-MM-dd')}
+    return ''
+}
 function Get-CorpusQueue {
     param([string]$Root)
     if(Test-Path -LiteralPath (Join-Path $Root '.yt-osint-migration-incomplete')){throw 'This corpus copy is incomplete. Use the original corpus.'}
     $queue=Read-CorpusJson (Join-Path $Root 'data/queue.json')
     if(-not $queue){$queue=[pscustomobject]@{SchemaVersion=1;Paused=$true;Items=@();SyncJobs=@()}}
     if($queue.SchemaVersion -ne 1){throw 'Unsupported queue format.'}
+    if(-not $queue.PSObject.Properties['AwaitingReview']){$queue | Add-Member NoteProperty AwaitingReview $false}
     if(-not $queue.PSObject.Properties['SyncJobs']){$queue | Add-Member NoteProperty SyncJobs @()}
     if(-not $queue.PSObject.Properties['DiscoveryJobIds']){$queue | Add-Member NoteProperty DiscoveryJobIds @($queue.SyncJobs | Where-Object Status -in @('Pending','Discovering','Downloading','Cancelling') | ForEach-Object {$_.Id})}
     foreach($job in $queue.SyncJobs){if(-not $job.PSObject.Properties['ClearedResults']){$job | Add-Member NoteProperty ClearedResults ([pscustomobject]@{Completed=0;Skipped=0;Failed=0;Cancelled=0})}}
@@ -12,6 +19,7 @@ function Get-CorpusQueue {
         if(-not $item.PSObject.Properties['JobIds']){$item | Add-Member NoteProperty JobIds @()}
         if(-not $item.PSObject.Properties['Batch']){$item | Add-Member NoteProperty Batch $true}
         if(-not $item.PSObject.Properties['ListingEntry']){$item | Add-Member NoteProperty ListingEntry $null}
+        if(-not $item.PSObject.Properties['EstPublishedDate']){$item | Add-Member NoteProperty EstPublishedDate (ConvertTo-CorpusQueueDate (Get-CorpusProperty $item.ListingEntry upload_date ''))}
     }
     return $queue
 }
@@ -61,6 +69,7 @@ function Add-CorpusQueueUrls {
         foreach($entry in $entries){
             if($seen.ContainsKey($entry.Id)){
                 $existing=$seen[$entry.Id]
+                if(-not $existing.EstPublishedDate){$existing.EstPublishedDate=ConvertTo-CorpusQueueDate (Get-CorpusProperty $listingById[$entry.Id] upload_date '')}
                 if($JobId){$existing.JobIds=@(@($existing.JobIds)+$JobId | Select-Object -Unique)}else{$existing.Batch=$true}
                 $duplicates++;continue
             }
@@ -74,6 +83,7 @@ function Add-CorpusQueueUrls {
                 Title=$(if($video){$video.VideoTitle}else{Get-CorpusProperty $listingById[$entry.Id] title $entry.Id});SubjectId=$effectiveId;SubjectName=$(if($subject.Count){$subject[0].name}else{''})
                 Status='Pending';Detail='';AddedAt=[datetime]::UtcNow.ToString('o');StartedAt=$null;FinishedAt=$null
                 RefreshTranscript=[bool]$RefreshTranscript;ExportWorkbook=[bool]$ExportWorkbook
+                EstPublishedDate=$(if($video -and (ConvertTo-CorpusQueueDate (Get-CorpusProperty $video PublishedDate ''))){ConvertTo-CorpusQueueDate $video.PublishedDate}else{ConvertTo-CorpusQueueDate (Get-CorpusProperty $listingById[$entry.Id] upload_date '')})
                 JobIds=@(if($JobId){$JobId});Batch=(-not $JobId);ListingEntry=$listingById[$entry.Id]
             }
             $newItems.Add($newItem);$seen[$entry.Id]=$newItem;$added++
@@ -146,14 +156,15 @@ function Update-CorpusQueue {
     } finally {$lock.Dispose()}
 }
 function Invoke-CorpusQueue {
-    param([string]$Root,$Shared=$null)
+    param([string]$Root,$Shared=$null,[switch]$ReviewAfterDiscovery)
+    $discoveredThisRun=$false
     $runner=Enter-CorpusQueueRunner $Root;$writer=$null;$dependency=$null;$commit=$null
     try {
         $dependency=Enter-CorpusDependencyLock;$commit=Enter-CorpusDependencyLock -Commit
         $writer=[IO.File]::Open((Join-Path $Root 'data/corpus.lock'),[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
         $lock=Enter-CorpusConfigLock $Root
         try {
-            $queue=Get-CorpusQueue $Root;$queue.Paused=$false
+            $queue=Get-CorpusQueue $Root;$queue.Paused=$false;$queue.AwaitingReview=$false
             foreach($job in $queue.SyncJobs){if($job.Status -eq 'Discovering'){$job.Status='Pending'}}
             foreach($item in $queue.Items){if($item.Status -eq 'Running'){$item.Status='Pending';$item.Detail='Resuming interrupted work.'}}
             Save-CorpusQueue $Root $queue
@@ -170,13 +181,16 @@ function Invoke-CorpusQueue {
                     $discover=$jobs[0];$discover.Status='Discovering';Save-CorpusQueue $Root $queue
                 }
                 if(-not $discover -and -not $pending.Count){$queue.Paused=$true;Save-CorpusQueue $Root $queue;break}
+                if(-not $discover -and $ReviewAfterDiscovery -and $discoveredThisRun){
+                    $queue.Paused=$true;$queue.AwaitingReview=$true;Save-CorpusQueue $Root $queue;break
+                }
                 if($discover){$item=$null}else {
                 $item=$pending[0];$item.Status='Running';$item.StartedAt=[datetime]::UtcNow.ToString('o');$item.Detail='Downloading metadata and transcript'
                 }
                 Save-CorpusQueue $Root $queue
             } finally {$lock.Dispose()}
             if($Shared){$Shared.Progress=@{Stage=$(if($discover){'Discovering channel'}else{'Downloading video'});Item=$(if($discover){$discover.Url}else{$item.Title});Current=0;Total=0}}
-            if($discover){Invoke-CorpusQueuedDiscovery $Root $discover $Shared;continue}
+            if($discover){Invoke-CorpusQueuedDiscovery $Root $discover $Shared;$discoveredThisRun=$true;continue}
             $status='Completed';$detail='';$pause=$false
             try {
                 $run=Invoke-CorpusOperation $Root Video @{Url=$item.Url;SubjectId=$item.SubjectId;SubjectName=$item.SubjectName;RefreshTranscript=$item.RefreshTranscript;SkipWorkbook=(-not $item.ExportWorkbook);ListingEntry=$item.ListingEntry} $Shared -CorpusLock $writer
@@ -196,7 +210,7 @@ function Invoke-CorpusQueue {
                 $queue=Get-CorpusQueue $Root;$saved=@($queue.Items | Where-Object Id -eq $item.Id)[0]
                 $saved.Status=$status;$saved.Detail=$detail;$saved.FinishedAt=[datetime]::UtcNow.ToString('o')
                 $video=Read-CorpusJson (Join-Path $Root "data/normalized/videos/$($item.VideoId).json")
-                if($video){$saved.Title=$video.VideoTitle}
+                if($video){$saved.Title=$video.VideoTitle;$verifiedDate=ConvertTo-CorpusQueueDate (Get-CorpusProperty $video PublishedDate '');if($verifiedDate){$saved.EstPublishedDate=$verifiedDate}}
                 if($pause){$queue.Paused=$true}
                 Save-CorpusQueue $Root $queue
             } finally {$lock.Dispose()}
@@ -326,7 +340,7 @@ function Get-CorpusQueueProgress {
         $text="${phase}: $discovered of $($jobs.Count) listed or resolved · $($Queue.Items.Count) videos currently listed. Downloads wait for every queued channel."
         $maximum=[math]::Max(1,$jobs.Count);$value=$discovered
     }else{
-        $phase=if(-not $Queue.Items.Count){'Queue empty'}elseif(-not $pending -and -not $running){'Queue complete'}elseif($Queue.Paused -and $running){'Pausing downloads'}elseif($Queue.Paused){'Queue paused'}else{'Downloading videos'}
+        $phase=if(-not $Queue.Items.Count){'Queue empty'}elseif(-not $pending -and -not $running){'Queue complete'}elseif($Queue.Paused -and $running){'Pausing downloads'}elseif($Queue.Paused -and (Get-CorpusProperty $Queue AwaitingReview $false)){'Review discovered videos'}elseif($Queue.Paused){'Queue paused'}else{'Downloading videos'}
         $text="$phase · $finished of $($Queue.Items.Count) visible videos finished · $pending pending · $running downloading · $failures failed"
         $maximum=[math]::Max(1,$Queue.Items.Count);$value=$finished
     }

@@ -42,6 +42,7 @@ $check={
     function Click($button){if(-not $button.IsEnabled){throw "$($button.Name) should be enabled"};$button.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))}
     switch($state.UnifiedStage){
         0 {
+            $ui.QueueReview.IsChecked=$false # This integration exercises uninterrupted scheduling.
             if($ui.SubjectPick.Items[0].name -ne 'Astronomy'){throw 'Default subject sort is not alphabetical'}
             $ui.SubjectPick.SelectedItem=@($ui.SubjectPick.Items | Where-Object id -eq mo)[0]
             $ui.SubjectSort.SelectedIndex=1

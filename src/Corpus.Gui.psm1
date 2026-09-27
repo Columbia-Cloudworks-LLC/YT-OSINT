@@ -44,6 +44,10 @@ function Show-CorpusWindow {
     foreach($entry in @{OpenTranscript='Transcript';OpenResult='YouTube';OpenWorkbook='Excel';Build='Export';QueueToggle='Play';QueueRemove='Remove';QueueRetry='Retry';QueueClear='Clear';SyncSelected='Retry';SyncAll='Retry';CancelSync='Remove'}.GetEnumerator()){Set-CorpusButtonIcon $ui[$entry.Key] $entry.Value}
     $state=@{Worker=$null;Handle=$null;Shared=$null;Operation='';Snapshot=$null;Ready=[bool]$SkipDependencies;Closing=$false;PendingSubject='';SmokeTicks=0;LastOutcome='Ready';CheckedStartup=(([bool]$SkipDependencies -or [bool]$SmokeTest) -and -not $SmokeCheckDependencies);RestartRequired=$false;RestartTicket=$null;DependencyRows=@();SmokeStage=0;ViewerVerified=$false;SmokeError='';QueueWorker=$null;QueueHandle=$null;QueueShared=$null;Queue=[pscustomobject]@{Paused=$true;Items=@();SyncJobs=@()};QueueStamp='';SelectCreatedSubject=$false;RestoringQueue=$false;QueueTicks=0;NeedsRefresh=$false;QueueReader=$null;QueueReadHandle=$null;QueueSnapshot=$null;QueueNext=$null;QueueReadRequested=$true;QueueInitialized=$false;QueueView=[YouTubeCorpus.QueueView]::new();QueueSelectionDirty=$true}
     $ui.QueueGrid.ItemsSource=$state.QueueView.Rows
+    $artwork=Join-Path $appRoot 'docs/yt-osint-header-bg.png'
+    if(Test-Path -LiteralPath $artwork){
+        $bitmap=[Windows.Media.Imaging.BitmapImage]::new();$bitmap.BeginInit();$bitmap.CacheOption=[Windows.Media.Imaging.BitmapCacheOption]::OnLoad;$bitmap.UriSource=[uri]$artwork;$bitmap.EndInit();$bitmap.Freeze();$ui.HeaderArtwork.Source=$bitmap
+    }
     $state.CleanupTasks=[Collections.Generic.List[Threading.Tasks.Task]]::new()
     $mutators=@('CreateSubject','RemoveSubject','RenameSubject','AddChannel','RemoveChannel','SyncSelected','SyncAll','Refresh','CancelSync','ImportVideo','Build','Search','FilterCorpus','RefreshChannelTranscripts','RefreshVideoTranscript','OpenTranscript','AutoExport','QueueToggle','QueueRemove','QueueRetry','QueueClear')
     $ui.Paths.Text="Current corpus folder: $Root`nWorkbook: $(Join-Path $Root 'output/YouTubeCorpus.xlsx')`nSource configuration: $(Join-Path $Root 'config.json')`nNative dependencies: $(Get-CorpusNativeRoot)"
@@ -104,6 +108,8 @@ function Show-CorpusWindow {
         $pendingSelected=[YouTubeCorpus.QueueView]::PendingSelected($ui.QueueGrid.SelectedItems)
         $ui.QueueSelection.Text="$($ui.QueueGrid.SelectedItems.Count) selected · $pendingSelected pending"
         $ui.QueueRemove.IsEnabled=($available -and $pendingSelected -gt 0)
+        $ui.QueueSelectBefore.IsEnabled=($available -and $null -ne $ui.QueueBefore.SelectedDate)
+        $ui.QueueReview.IsEnabled=($available -and -not $state.QueueWorker)
         $ui.QueueRetry.IsEnabled=($available -and $ui.QueueGrid.SelectedItems.Count -eq 1 -and $selected -and $selected.Status -in @('Failed','Cancelled'))
         $counts=if($state.QueueSnapshot){$state.QueueSnapshot.Counts}else{[YouTubeCorpus.QueueCounts]::new()}
         $ui.QueueClear.IsEnabled=($available -and $counts.Finished -gt 0)
@@ -128,7 +134,7 @@ function Show-CorpusWindow {
         $state.QueueInitialized=$true
         $summary=$state.QueueSnapshot.Progress
         $ui.QueueStatus.Text=$summary.Text;$ui.QueueProgress.Maximum=$summary.Maximum;$ui.QueueProgress.Value=$summary.Value
-        $ui.QueueActivity.Text=if($summary.WaitingChannels){'Video totals are still growing during discovery. No video download starts until all queued channels are resolved.'}elseif(-not $state.Queue.Items.Count){'Add video URLs in Subjects or queue a channel to get started.'}elseif($summary.Phase -eq 'Queue complete'){'All visible videos have finished. Clear finished removes history, not captured files.'}elseif($state.Queue.Paused){'Ready when you are. Start continues pending work; captured files are preserved.'}else{'All queued channels are listed. Processing videos sequentially.'}
+        $ui.QueueActivity.Text=if($summary.WaitingChannels){'Video totals are still growing during discovery. No video download starts until all queued channels are resolved.'}elseif(-not $state.Queue.Items.Count){'Add video URLs in Subjects or queue a channel to get started.'}elseif($summary.Phase -eq 'Queue complete'){'All visible videos have finished. Clear finished removes history, not captured files.'}elseif($summary.Phase -eq 'Review discovered videos'){'Discovery finished. Sort by Est. Publish Date, select and remove older pending videos, then press Start to capture the rest.'}elseif($state.Queue.Paused){'Ready when you are. Start continues pending work; captured files are preserved.'}else{'All queued channels are listed. Processing videos sequentially.'}
 
         Update-StatusIndicators;Update-SubjectLock;Update-QueueButtons;Show-ChannelDetails
     }
@@ -330,8 +336,9 @@ function Show-CorpusWindow {
             $ErrorActionPreference='Stop'
             foreach($name in @('Logging','Core','Process','Dependencies','RateLimit','DependencyTransaction','Transcript','YouTube','Excel','Operations','Queue','Settings')){Import-Module (Join-Path $codeRoot "src/Corpus.$name.psm1") -Force -Global}
             if($testAdapter){& (Get-Module Corpus.Queue) ([scriptblock]::Create($testAdapter))}
-            Invoke-CorpusQueue $root $shared
+            Invoke-CorpusQueue $root $shared -ReviewAfterDiscovery:([bool]$shared.ReviewAfterDiscovery)
         }).AddArgument($Root).AddArgument($state.QueueShared).AddArgument($appRoot).AddArgument($(if($SmokeTest){$SmokeQueueAdapter}else{''}))
+        $state.QueueShared.ReviewAfterDiscovery=[bool]$ui.QueueReview.IsChecked
         $state.QueueWorker=$ps;$state.QueueHandle=$ps.BeginInvoke();$state.Queue.Paused=$false;Set-Busy $false
     }
     $ui.QueueGrid.Add_SelectionChanged({$state.QueueSelectionDirty=$true;if(-not $state.RestoringQueue){Update-QueueButtons}})
@@ -339,6 +346,13 @@ function Show-CorpusWindow {
         if($state.QueueWorker -or -not $state.Queue.Paused){Start-Work 'QueueAction' @{Action='Pause';Id=''}}else{Start-QueueWork}
     })
     $ui.QueueRemove.Add_Click({$ids=[YouTubeCorpus.QueueView]::SelectedIds($ui.QueueGrid.SelectedItems);if($ids.Count){Start-Work 'QueueRemove' @{Ids=$ids}}})
+    $ui.QueueBefore.Add_SelectedDateChanged({Update-QueueButtons})
+    $ui.QueueSelectBefore.Add_Click({
+        if(-not $ui.QueueBefore.SelectedDate -or $state.QueueView.IsApplying){return}
+        $state.RestoringQueue=$true
+        try{$ui.QueueGrid.SelectPendingBefore($ui.QueueBefore.SelectedDate)}finally{$state.RestoringQueue=$false}
+        Update-QueueButtons
+    })
     $ui.QueueRetry.Add_Click({if($ui.QueueGrid.SelectedItem){Start-Work 'QueueAction' @{Action='Retry';Id=$ui.QueueGrid.SelectedItem.Id}}})
     $ui.QueueClear.Add_Click({Start-Work 'QueueAction' @{Action='ClearFinished';Id=''}})
     $ui.Build.Add_Click({Start-Work 'Build'})

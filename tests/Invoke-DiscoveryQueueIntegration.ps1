@@ -17,7 +17,7 @@ function script:Sync-CorpusChannel {
         [IO.File]::WriteAllText((Join-Path $Context.Root 'discovering.txt'),'ready')
         $deadline=[datetime]::UtcNow.AddSeconds(45)
         while(-not (Test-Path (Join-Path $Context.Root 'release-discovery.txt'))){Test-CorpusCancellation $Context;if([datetime]::UtcNow -gt $deadline){throw 'Discovery fixture timeout'};Start-Sleep -Milliseconds 50}
-        return [pscustomobject]@{ChannelId='UC1234567890123456789012';Entries=@([pscustomobject]@{id='abcDEF12_-3';title='Shared video'},[pscustomobject]@{id='xyzDEF12_-3';title='First channel video'})}
+        return [pscustomobject]@{ChannelId='UC1234567890123456789012';Entries=@([pscustomobject]@{id='abcDEF12_-3';title='Shared video';upload_date='20230201'},[pscustomobject]@{id='xyzDEF12_-3';title='First channel video';upload_date='20260901'})}
     }
     [pscustomobject]@{ChannelId='UC2234567890123456789012';Entries=@([pscustomobject]@{id='abcDEF12_-3';title='Shared video'},[pscustomobject]@{id='newDEF12_-3';title='Second channel video'})}
 }
@@ -58,6 +58,20 @@ $check={
         3 {
             if($state.QueueWorker){return}
             if((Label) -ne 'Start' -or $state.Queue.SyncJobs[1].Status -ne 'Pending' -or $ui.QueueProgress.Value -ne 1){throw 'Paused discovery lost its progress'}
+            Click $ui.QueueToggle;$state.DiscoveryTestStage=35
+        }
+        35 {
+            if($state.QueueWorker -or $ui.QueueGrid.Items.Count -ne 3){return}
+            if(Test-Path (Join-Path $root started.txt)){throw 'Review pause allowed a download'}
+            if(-not $state.Queue.AwaitingReview -or $ui.QueueStatus.Text -notmatch 'Review discovered videos'){throw 'Discovery review state is missing'}
+            if(-not $ui.HeaderArtwork.Source -or $ui.BrandHeader.ActualHeight -ne 104){throw 'Branded header failed to load at the intended height'}
+            $column=@($ui.QueueGrid.Columns | Where-Object Header -eq 'Est. Publish Date')[0]
+            $ui.QueueGrid.SortColumn($column)
+            if($ui.QueueGrid.Items[0].VideoId -ne 'abcDEF12_-3' -or $ui.QueueGrid.Items[2].PublishedDateLabel -ne 'Unknown'){throw 'Ascending date sort is incorrect'}
+            $ui.QueueGrid.SortColumn($column)
+            if($ui.QueueGrid.Items[0].VideoId -ne 'xyzDEF12_-3' -or $ui.QueueGrid.Items[2].PublishedDateLabel -ne 'Unknown'){throw 'Descending date sort is incorrect'}
+            $ui.QueueBefore.SelectedDate=[datetime]'2024-01-01';Click $ui.QueueSelectBefore
+            if($ui.QueueGrid.SelectedItems.Count -ne 1 -or $ui.QueueGrid.SelectedItem.VideoId -ne 'abcDEF12_-3' -or -not $ui.QueueRemove.IsEnabled){throw 'Date cutoff did not select only the old pending video'}
             Click $ui.QueueToggle;$state.DiscoveryTestStage=4
         }
         4 {

@@ -62,6 +62,7 @@ namespace YouTubeCorpus
                 {
                     case "Status": return row.Status;
                     case "Title": return row.Title;
+                    case "EstPublishedDate": return row.EstPublishedDate;
                     case "SubjectName": return row.SubjectName;
                     case "Url": return row.Url;
                     case "Detail": return row.Detail;
@@ -73,6 +74,11 @@ namespace YouTubeCorpus
                 var a = (QueueRow)x; var b = (QueueRow)y;
                 foreach (var sort in sorts)
                 {
+                    if (sort.PropertyName == "EstPublishedDate")
+                    {
+                        bool aUnknown = String.IsNullOrEmpty(a.EstPublishedDate), bUnknown = String.IsNullOrEmpty(b.EstPublishedDate);
+                        if (aUnknown != bUnknown) return aUnknown ? 1 : -1;
+                    }
                     int result = culture.Compare(Value(a, sort.PropertyName), Value(b, sort.PropertyName), CompareOptions.None);
                     if (result != 0) return sort.Direction == ListSortDirection.Ascending ? result : -result;
                 }
@@ -91,6 +97,19 @@ namespace YouTubeCorpus
             var rows = new QueueRow[Math.Min(count, Items.Count)];
             for (int i = 0; i < rows.Length; i++) rows[i] = (QueueRow)Items[i];
             SelectRows(rows);
+        }
+        public void SelectPendingBefore(DateTime cutoff)
+        {
+            string limit = cutoff.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+            BeginUpdateSelectedItems();
+            try
+            {
+                SelectedItems.Clear();
+                foreach (QueueRow row in Items)
+                    if (row.Status == "Pending" && !String.IsNullOrEmpty(row.EstPublishedDate) && StringComparer.Ordinal.Compare(row.EstPublishedDate, limit) < 0)
+                        SelectedItems.Add(row);
+            }
+            finally { EndUpdateSelectedItems(); }
         }
         internal void ReplaceRows(QueueRows source, List<QueueRow> replacement)
         {
@@ -114,6 +133,7 @@ namespace YouTubeCorpus
     // The authoritative writer continues to preserve every persisted field.
     public sealed class QueueItemData
     {
+        public string EstPublishedDate { get; set; }
         public string Id { get; set; }
         public string VideoId { get; set; }
         public string SubjectId { get; set; }
@@ -137,6 +157,7 @@ namespace YouTubeCorpus
     }
     public sealed class QueueDocument
     {
+        public bool AwaitingReview { get; set; }
         public int SchemaVersion { get; set; }
         public bool Paused { get; set; }
         public QueueItemData[] Items { get; set; }
@@ -146,6 +167,8 @@ namespace YouTubeCorpus
     // Snapshot instances belong to the reader. Bound rows belong only to the dispatcher.
     public sealed class QueueRow : INotifyPropertyChanged
     {
+        public string EstPublishedDate { get; private set; }
+        public string PublishedDateLabel { get { return String.IsNullOrEmpty(EstPublishedDate) ? "Unknown" : EstPublishedDate; } }
         public string Id { get; private set; }
         public string VideoId { get; private set; }
         public string SubjectId { get; private set; }
@@ -166,29 +189,37 @@ namespace YouTubeCorpus
         public event PropertyChangedEventHandler PropertyChanged;
         public QueueRow(PSObject item)
         {
+            EstPublishedDate = NormalizeDate(Text(item, "EstPublishedDate"));
             Id = Text(item, "Id"); VideoId = Text(item, "VideoId"); SubjectId = Text(item, "SubjectId");
             Title = Text(item, "Title"); SubjectName = Text(item, "SubjectName"); Url = Text(item, "Url");
             Detail = Text(item, "Detail"); Status = Text(item, "Status");
         }
         internal QueueRow(QueueItemData item)
         {
+            EstPublishedDate = NormalizeDate(item.EstPublishedDate);
             Id = item.Id ?? ""; VideoId = item.VideoId ?? ""; SubjectId = item.SubjectId ?? "";
             Title = item.Title ?? ""; SubjectName = item.SubjectName ?? ""; Url = item.Url ?? "";
             Detail = item.Detail ?? ""; Status = item.Status ?? "";
         }
         internal QueueRow Copy() { return (QueueRow)MemberwiseClone(); }
+        private static string NormalizeDate(string value)
+        {
+            DateTime date;
+            return DateTime.TryParseExact(value, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out date) ? value : "";
+        }
         internal static string Text(PSObject item, string name)
         {
             var property = item.Properties[name]; return property == null ? "" : Convert.ToString(property.Value);
         }
         internal bool Same(QueueRow other)
         {
-            return Title == other.Title && SubjectName == other.SubjectName && Url == other.Url &&
+            return EstPublishedDate == other.EstPublishedDate && Title == other.Title && SubjectName == other.SubjectName && Url == other.Url &&
                 Detail == other.Detail && Status == other.Status && SubjectId == other.SubjectId && VideoId == other.VideoId;
         }
         internal void Update(QueueRow other)
         {
             bool statusChanged = Status != other.Status;
+            if (EstPublishedDate != other.EstPublishedDate) { EstPublishedDate = other.EstPublishedDate; Notify("EstPublishedDate"); Notify("PublishedDateLabel"); }
             if (Title != other.Title) { Title = other.Title; Notify("Title"); }
             if (SubjectName != other.SubjectName) { SubjectName = other.SubjectName; Notify("SubjectName"); }
             if (Url != other.Url) { Url = other.Url; Notify("Url"); }

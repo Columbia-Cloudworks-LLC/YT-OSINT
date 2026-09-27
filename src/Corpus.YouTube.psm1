@@ -203,7 +203,7 @@ function Sync-CorpusChannel {
     $channel=$null;$attemptStatus='Failed'
     try {
         Set-CorpusProgress $Context 'Channel enumeration' $url 0 0
-        $args=(Get-CorpusYtArguments)+@('--flat-playlist','--dump-single-json','--ignore-errors')
+        $args=(Get-CorpusYtArguments)+@('--flat-playlist','--extractor-args','youtubetab:approximate_date','--dump-single-json','--ignore-errors')
         if($Limit -gt 0){$args+=@('--playlist-end',"$Limit")}
         $r=Invoke-CorpusYouTubeProcess $Context ($args+@('--',$url)) -Kind Enumeration -TimeoutSeconds 1800 -Quiet
         if($r.ExitCode){throw "Channel enumeration failed (yt-dlp exit $($r.ExitCode))."}

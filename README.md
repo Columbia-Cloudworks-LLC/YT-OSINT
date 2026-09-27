@@ -86,6 +86,8 @@ Cooldown deadlines and retry counts are saved in `%LOCALAPPDATA%\YT-OSINT\youtub
 
 ### Current interface
 
+The header uses the bundled red-and-white artwork with white text, a dark text shadow, and a translucent gradient for contrast. The image scales to fill the header without distorting its proportions.
+
 Fresh screenshots from the real WPF application with isolated sample data and simulated queue states (no personal corpus or network requests):
 
 ![Subjects sorted alphabetically with channels above the subject-specific batch importer](docs/screenshots/subjects.png)
@@ -109,6 +111,8 @@ Large queues have a separate background snapshot reader and a compiled, lightwei
 The main Cancel button applies to a foreground operation such as search. The queue has one **Start / Pause** control at its bottom right: Pause finishes the active discovery or video safely, shows **Pausing…**, and starts nothing else. Channel-specific cancellation remains available on Channels. Closing can terminate the active child process tree where practical. Completed atomic commits survive. Excel cancellation is checked between rows/stages; the final EPPlus save is not interruptible mid-write. The application stays interactive and honors cancellation at the next safe boundary. Closing during work requests cancellation and waits for safe cleanup. Only one capture/export writer and one queue runner can operate on a corpus. Queue and subject changes share a separate short file lock, so downloads do not block configuration edits. Closing during a queued import returns the interrupted item to Pending and saves the queue paused. Abandoned Running items are recovered to Pending when no queue runner owns them; the next launch requires an explicit resume.
 
 ## Queue selection, status, and storage settings
+
+**Pause after channel discovery for review** is enabled by default. Queue your channels and press Start to list them all; the queue pauses before video capture. Sort **Est. Publish Date**, choose a cutoff, and use **Select pending before date**, then **Remove selected pending items** to prune older videos across channels. Press Start again to capture the remaining work. Unknown dates stay unselected. Dates from discovery can be inaccurate; cached or captured publication dates replace them when available. This uses fast channel listings without an additional metadata request per video. Uncheck the review option before starting for uninterrupted processing. Sorting changes the display only; the cutoff is not a saved exclusion rule for future syncs. See the [review workflow](docs/QUEUE.md#review-older-videos-before-capture).
 
 Start lists **all** queued channels before processing any video, including earlier batch URLs. Discovery and downloads stay sequential. New channels added during a download are listed after that item and before the next video. Discovery failures are reported and resolved without a later automatic retry; rate limits pause the queue and leave discovery pending. Queue-local progress shows channels listed/resolved during discovery, then finished/pending/downloading/failed counts for the visible video list. Clearing rows changes those visible-list counts. These counts are not an ETA.
 

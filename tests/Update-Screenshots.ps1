@@ -25,6 +25,8 @@ $statuses=@('Completed','Completed','Skipped','Failed','Cancelled','Pending','Pe
 $q=Get-CorpusQueue $fixtureRoot
 for($i=0;$i -lt $q.Items.Count;$i++){$q.Items[$i].Title=$titles[$i];$q.Items[$i].Status=$statuses[$i];$q.Items[$i].JobIds=@($(if($i % 2 -eq 0){$jobA}else{$jobB}));$q.Items[$i].Detail=switch($statuses[$i]){'Completed' {'Metadata and English transcript saved'}'Skipped' {'No original English transcript available'}'Failed' {'Sample request failed; select this row to retry'}'Cancelled' {'Removed before download; partial channel import'}default {'Waiting for its turn'}}}
 foreach($job in $q.SyncJobs){$job.Status='Downloading'}
+$dates=@('2026-09-12','2026-08-04','2025-07-19','2024-03-01','2022-11-05','2023-02-01','2026-09-01','')
+for($i=0;$i -lt $q.Items.Count;$i++){$q.Items[$i].EstPublishedDate=$dates[$i]}
 $q.SyncJobs[0] | Add-Member NoteProperty PartialImport $true
 Write-CorpusJson (Join-Path $fixtureRoot data/queue.json) $q
 $null=[IO.Directory]::CreateDirectory((Join-Path $OutputDirectory screenshots))
@@ -44,12 +46,14 @@ $check={
     switch($state.ScreenshotStage){
         0 {
             $window.Height=920
+            $ui.QueueBefore.SelectedDate=[datetime]'2024-01-01'
             $ui.SubjectPick.SelectedItem=@($ui.SubjectPick.Items | Where-Object id -eq technology)[0]
             $ui.Tabs.SelectedIndex=0;$state.ScreenshotStage=1
         }
         1 {Save-DocumentationScreenshot $window 'screenshots/subjects.png';$ui.Tabs.SelectedIndex=1;$ui.ChannelsGrid.SelectedIndex=0;$state.ScreenshotStage=2}
         2 {
             Save-DocumentationScreenshot $window 'screenshots/channels.png'
+            $window.Height=1000 # Keep every sample date, including Unknown, visible in queue screenshots.
             $q=Get-CorpusQueue $fixtureRoot;$q.Paused=$false;$q.Items[5].Status='Running';$q.Items[5].Detail='Downloading metadata and English transcript'
             Write-CorpusJson (Join-Path $fixtureRoot data/queue.json) $q
             $ui.QueueTab.IsSelected=$true;$state.ScreenshotStage=3

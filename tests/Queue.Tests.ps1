@@ -178,6 +178,35 @@ Describe 'Universal channel and batch scheduler' {
         $q.Items[0].SubjectId | Should Be mo;$q.Items[0].ListingEntry.title | Should Be 'Discovered video'
         Assert-MockCalled Invoke-CorpusOperation -ModuleName Corpus.Queue -Times 1 -Exactly -Scope It
     }
+    It 'lists all channels and enriches shared batch dates before review then resumes without another review pause' {
+        $null=Add-CorpusQueueUrls $root 'https://youtu.be/abcDEF12_-3' mo
+        $null=Add-CorpusSyncJob $root $url mo
+        $null=Add-CorpusSyncJob $root 'https://www.youtube.com/@lessbitter' mo
+        Mock Sync-CorpusChannel -ModuleName Corpus.Queue {[pscustomobject]@{ChannelId='UC1234567890123456789012';Entries=@([pscustomobject]@{id='abcDEF12_-3';upload_date='20230201'},[pscustomobject]@{id='xyzDEF12_-3';upload_date='invalid'})}}
+        Invoke-CorpusQueue $root $shared -ReviewAfterDiscovery
+        $q=Get-CorpusQueue $root;$q.Paused | Should Be $true;$q.AwaitingReview | Should Be $true
+        $q.Items.Count | Should Be 2;$q.Items[0].EstPublishedDate | Should Be '2023-02-01';$q.Items[1].EstPublishedDate | Should Be ''
+        @($q.SyncJobs | Where-Object Status -eq Downloading).Count | Should Be 2
+        Assert-MockCalled Invoke-CorpusOperation -ModuleName Corpus.Queue -Times 0 -Exactly -Scope It
+        $null=Remove-CorpusQueueItems $root @($q.Items[0].Id)
+        Update-CorpusQueue $root ClearFinished
+        Invoke-CorpusQueue $root $shared -ReviewAfterDiscovery
+        $q=Get-CorpusQueue $root;$q.AwaitingReview | Should Be $false;$q.Items[0].Status | Should Be Completed
+        @($q.SyncJobs | Where-Object Status -eq Partial).Count | Should Be 2
+        Assert-MockCalled Invoke-CorpusOperation -ModuleName Corpus.Queue -Times 1 -Exactly -Scope It
+    }
+    It 'replaces an estimated date with captured metadata and keeps cached dates on rediscovery' {
+        $null=Add-CorpusQueueUrls $root 'https://youtu.be/abcDEF12_-3' mo -ListingEntries @([pscustomobject]@{id='abcDEF12_-3';upload_date='20230101'})
+        Mock Invoke-CorpusOperation -ModuleName Corpus.Queue {
+            $ctx=New-CorpusContext $Root
+            Save-CorpusVideo $ctx (ConvertTo-CorpusVideo ([pscustomobject]@{id='abcDEF12_-3';upload_date='20230203'}) mo Mo)
+            [pscustomobject]@{MembersOnlySkipped=0;TranscriptsUnavailable=0;FinalState='Success'}
+        }
+        Invoke-CorpusQueue $root $shared -ReviewAfterDiscovery
+        (Get-CorpusQueue $root).Items[0].EstPublishedDate | Should Be '2023-02-03'
+        $null=Add-CorpusQueueUrls $root 'https://youtu.be/abcDEF12_-3' mo -ListingEntries @([pscustomobject]@{id='abcDEF12_-3';upload_date='20230101'})
+        (Get-CorpusQueue $root).Items[1].EstPublishedDate | Should Be '2023-02-03'
+    }
     It 'shares a pending batch video and preserves it when cancelling its channel sync' {
         $id=Add-CorpusSyncJob $root $url mo
         $null=Add-CorpusQueueUrls $root 'https://youtu.be/abcDEF12_-3' mo
