@@ -199,18 +199,52 @@ Describe 'Universal channel and batch scheduler' {
         $null=Add-CorpusSyncJob $root $url mo
         (Get-CorpusQueue $root).SyncJobs.Count | Should Be 1
     }
-    It 'does not discover the next channel until the first channel downloads finish' {
+    It 'discovers every queued channel before downloading even an older batch item' {
+        $null=Add-CorpusQueueUrls $root 'https://youtu.be/abcDEF12_-3' mo
         $null=Add-CorpusSyncJob $root $url mo
         $null=Add-CorpusSyncJob $root 'https://www.youtube.com/@lessbitter' mo
         Mock Sync-CorpusChannel -ModuleName Corpus.Queue {
-            if($Url -match 'lessbitter'){
-                if((Get-CorpusQueue $Context.Root).SyncJobs[0].Status -ne 'Completed'){throw 'Second discovery ran early'}
-                return [pscustomobject]@{ChannelId='UC2234567890123456789012';Entries=@()}
-            }
+            if(@((Get-CorpusQueue $Context.Root).Items | Where-Object Status -ne Pending).Count){throw 'A video ran before all discoveries'}
+            [pscustomobject]@{ChannelId=$(if($Url -match 'lessbitter'){'UC2234567890123456789012'}else{'UC1234567890123456789012'});Entries=@([pscustomobject]@{id='abcDEF12_-3'})}
+        }
+        Mock Invoke-CorpusOperation -ModuleName Corpus.Queue {
+            if(@((Get-CorpusQueue $Root).SyncJobs | Where-Object Status -in @('Pending','Discovering')).Count){throw 'Discovery barrier was bypassed'}
+            [pscustomobject]@{MembersOnlySkipped=0;TranscriptsUnavailable=0;FinalState='Success'}
+        }
+        Invoke-CorpusQueue $root $shared
+        $q=Get-CorpusQueue $root
+        @($q.SyncJobs | Where-Object Status -eq Completed).Count | Should Be 2
+        $q.Items.Count | Should Be 1;$q.Items[0].Status | Should Be Completed
+        Assert-MockCalled Sync-CorpusChannel -ModuleName Corpus.Queue -Times 2 -Exactly -Scope It
+        Assert-MockCalled Invoke-CorpusOperation -ModuleName Corpus.Queue -Times 1 -Exactly -Scope It
+    }
+    It 'discovers a channel added during a download before claiming the next video' {
+        $null=Add-CorpusSyncJob $root $url mo
+        Mock Sync-CorpusChannel -ModuleName Corpus.Queue {
+            $entries=if($Url -match 'lessbitter'){@([pscustomobject]@{id='newDEF12_-3'})}else{@([pscustomobject]@{id='abcDEF12_-3'},[pscustomobject]@{id='xyzDEF12_-3'})}
+            [pscustomobject]@{ChannelId=$(if($Url -match 'lessbitter'){'UC2234567890123456789012'}else{'UC1234567890123456789012'});Entries=$entries}
+        }
+        Mock Invoke-CorpusOperation -ModuleName Corpus.Queue {
+            if($Arguments.Url -match 'abcDEF12_-3'){$null=Add-CorpusSyncJob $Root 'https://www.youtube.com/@lessbitter' mo}
+            else{if(@((Get-CorpusQueue $Root).SyncJobs | Where-Object Status -in @('Pending','Discovering')).Count){throw 'New channel was left behind downloads'}}
+            [pscustomobject]@{MembersOnlySkipped=0;TranscriptsUnavailable=0;FinalState='Success'}
+        }
+        Invoke-CorpusQueue $root $shared
+        $q=Get-CorpusQueue $root;@($q.Items | Where-Object Status -eq Completed).Count | Should Be 3
+        @($q.SyncJobs | Where-Object Status -eq Completed).Count | Should Be 2
+    }
+    It 'pauses safely between discoveries and resumes discovery before downloading' {
+        $null=Add-CorpusSyncJob $root $url mo
+        $null=Add-CorpusSyncJob $root 'https://www.youtube.com/@lessbitter' mo
+        Mock Sync-CorpusChannel -ModuleName Corpus.Queue {
+            if($Url -match 'atmoio'){Update-CorpusQueue $Context.Root Pause}
             [pscustomobject]@{ChannelId='UC1234567890123456789012';Entries=@([pscustomobject]@{id='abcDEF12_-3'})}
         }
         Invoke-CorpusQueue $root $shared
-        @((Get-CorpusQueue $root).SyncJobs | Where-Object Status -eq Completed).Count | Should Be 2
+        $q=Get-CorpusQueue $root;$q.Paused | Should Be $true;$q.SyncJobs[1].Status | Should Be Pending;$q.Items[0].Status | Should Be Pending
+        Assert-MockCalled Invoke-CorpusOperation -ModuleName Corpus.Queue -Times 0 -Exactly -Scope It
+        Invoke-CorpusQueue $root $shared
+        (Get-CorpusQueue $root).Items[0].Status | Should Be Completed
     }
     It 'continues past failed discovery and unlocks the failed channel' {
         $null=Add-CorpusSyncJob $root $url mo
@@ -295,5 +329,47 @@ Describe 'Atomic multi-item removal' {
         foreach($job in (Get-CorpusQueue $root).SyncJobs){$job.Status | Should Be Partial;$job.PartialImport | Should Be $true;(Read-CorpusJson (Join-Path $root "data/normalized/channels/$($job.Id).json")).LastSync | Should Be '2026-09-01T00:00:00Z'}
         Update-CorpusQueue $root Retry $q.Items[0].Id
         foreach($job in (Get-CorpusQueue $root).SyncJobs){$job.Status | Should Be Partial}
+    }
+}
+
+Describe 'Clear finished history without losing sync results' {
+    BeforeEach {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));$null=New-CorpusContext $root
+        Copy-Item (Join-Path $PSScriptRoot fixtures/config.json) (Join-Path $root config.json)
+        $q=Get-CorpusQueue $root
+        $q.SyncJobs=@(foreach($id in @('a','b')){[pscustomobject]@{Id=$id;Status='Downloading';ChannelId=$id;Url="https://youtube.com/@$id";AddedAt='2026-09-27T00:00:00Z';FinishedAt=$null;Detail=''}})
+        $q.Items=@(foreach($status in @('Pending','Running','Completed','Skipped','Failed','Cancelled')){[pscustomobject]@{Id=$status;VideoId=$status;Status=$status;JobIds=@('a','b');Batch=$false;ListingEntry=$null}})
+        foreach($id in @('a','b')){Write-CorpusJson (Join-Path $root "data/normalized/channels/$id.json") ([pscustomobject]@{ChannelId=$id;LastSync='2026-09-01T00:00:00Z';Status='Downloading';TranscriptCount=0;WithoutTranscripts=0;Failures=0;MembersOnlySkipped=0})}
+        Write-CorpusJson (Join-Path $root data/queue.json) $q
+    }
+    It 'clears every terminal state immediately even when referenced by active jobs' {
+        Update-CorpusQueue $root ClearFinished
+        $q=Get-CorpusQueue $root;$q.Items.Count | Should Be 2
+        ($q.Items.Status -join ',') | Should Be 'Pending,Running'
+        foreach($job in $q.SyncJobs){$job.ClearedResults.Completed | Should Be 1;$job.ClearedResults.Skipped | Should Be 1;$job.ClearedResults.Failed | Should Be 1;$job.ClearedResults.Cancelled | Should Be 1}
+        Update-CorpusQueue $root ClearFinished
+        (Get-CorpusQueue $root).SyncJobs[0].ClearedResults.Failed | Should Be 1
+    }
+    It 'retains partial outcome and failure totals after reload and later completion' {
+        Update-CorpusQueue $root ClearFinished
+        $q=Get-CorpusQueue $root;foreach($item in $q.Items){$item.Status='Completed'}
+        Write-CorpusJson (Join-Path $root data/queue.json) $q
+        Update-CorpusQueue $root ClearFinished
+        $q=Get-CorpusQueue $root;$q.Items.Count | Should Be 0
+        foreach($job in $q.SyncJobs){$job.Status | Should Be Partial;$job.Detail | Should Match '6 videos; 1 failed; 1 cancelled';(Read-CorpusJson (Join-Path $root "data/normalized/channels/$($job.Id).json")).LastSync | Should Be '2026-09-01T00:00:00Z'}
+    }
+    It 'still completes a successful full sync when its successful rows were cleared' {
+        $q=Get-CorpusQueue $root;$q.Items=@($q.Items | Where-Object Status -in @('Pending','Completed','Skipped'))
+        Write-CorpusJson (Join-Path $root data/queue.json) $q
+        Update-CorpusQueue $root ClearFinished
+        $q=Get-CorpusQueue $root;$q.Items[0].Status='Completed';Write-CorpusJson (Join-Path $root data/queue.json) $q
+        Update-CorpusQueue $root ClearFinished
+        foreach($job in (Get-CorpusQueue $root).SyncJobs){$job.Status | Should Be Completed;$job.Detail | Should Match '3 videos; 0 failed; 0 cancelled'}
+    }
+    It 'exposes separate discovery and visible-video progress without inventing an ETA' {
+        $q=Get-CorpusQueue $root;$q.SyncJobs[0].Status='Discovering';$q.SyncJobs[1].Status='Pending';$q.Paused=$false
+        $progress=Get-CorpusQueueProgress $q;$progress.WaitingChannels | Should Be 2;$progress.Value | Should Be 0;$progress.Maximum | Should Be 2
+        $q.SyncJobs[0].Status='Downloading';$progress=Get-CorpusQueueProgress $q;$progress.DiscoveryFinished | Should Be 1
+        $q.SyncJobs[1].Status='Downloading';$progress=Get-CorpusQueueProgress $q;$progress.Phase | Should Be 'Downloading videos';$progress.Finished | Should Be 4;$progress.Maximum | Should Be 6
     }
 }

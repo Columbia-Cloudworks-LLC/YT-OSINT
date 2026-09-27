@@ -6,9 +6,11 @@ In **Subjects**, select a subject on the left. Subjects start in A–Z order; sw
 
 In **Channels**, select a channel on the left to view its details and controls on the right. Before discovery, the list shows a URL-derived label and subject in parentheses. After discovery, the saved channel name is used. **Queue channel sync** schedules discovery and downloads; **Queue all channels** adds configured channels that are not already scheduled. Selecting another channel never changes an existing job's source, subject, refresh choice, or export choice.
 
-Both entry points use the same sequential worker. Adding work does not start a paused queue: use **Video Queue → Start / resume**. Additions during a running queue are picked up automatically. No parallel YouTube requests are introduced. The video list contains only individual videos; discovery jobs appear as status on the selected channel and in the queue's channel-sync count.
+Both entry points use the same sequential worker. Adding work does not start a paused queue: use the bottom-right **Video Queue → Start** button. Additions during a running queue are picked up automatically. No parallel YouTube requests are introduced. The video list contains only individual videos; discovery jobs appear as status on the selected channel and in the queue's channel-sync count.
 
-A sync moves through Queued, Discovering, and Downloading before Completed, Partial, Failed, or Cancelled. The channel's sync button stays disabled while its job is active, including when paused. The next channel discovery waits until the previous channel's downloads finish or are cancelled. Batch videos and channel discoveries otherwise follow enqueue order; a discovered channel's videos are appended to the video list.
+A sync moves through Queued, Discovering, and Downloading before Completed, Partial, Failed, or Cancelled. The channel's sync button stays disabled while its job is active, including when paused. Discovery is a barrier before downloads: **every Pending channel is discovered before any video is claimed**, including batch URLs enqueued earlier. The discovered videos appear in the list while channel discovery progresses. If a channel is added during a download, that active video finishes, then the new channel is listed before another video begins. Shared videos are still downloaded only once.
+
+The queue has its own progress bar, phase text, and current-operation detail above the list. During discovery it shows channels listed or resolved and the number of videos currently listed; video totals are explicitly incomplete until discovery ends. A discovery failure is reported, not silently retried hours later. A rate limit leaves discovery Pending and pauses everything. After discovery, progress shows finished/pending/downloading/failed counts for **visible rows**, not an estimated duration. Clear finished removes those rows from the displayed denominator; channel result accounting is retained separately.
 
 ## Duplicate videos and ownership
 
@@ -20,15 +22,13 @@ Each job and video stores stable subject IDs. Changing UI selection never reassi
 
 | Control | Behavior |
 |---|---|
-| Start / resume | Run pending discovery and video work sequentially. |
-| Pause after current | Finish the active discovery or download, then stop. Discovered videos remain pending. |
-| Cancel current and pause | Stop the current discovery/import safely and leave later work pending. |
+| ▶ Start / ⏸ Pause | One button at the bottom right controls the entire list. Start discovers all queued channels before downloading videos. Pause finishes the active discovery/download safely, displays disabled **Pausing…**, and starts nothing else. Once idle, the button says Start; it is disabled when no work remains. |
 | Remove selected pending items | Ctrl+click, Shift+click, Shift+arrow or Ctrl+A selects rows. Remove all selected Pending items atomically; skip Running/finished/missing items. Sync-linked items remain as Cancelled history and their jobs become partial channel imports. |
 | Retry selected | Retry a Failed/Cancelled video as an independent item, preserving its assignment and refreshing its subject name. When its sync is still active, the original failure remains in history for accurate sync totals. |
-| Clear finished | Clear terminal video history and preserve captures; terminal items referenced by an active sync are retained until that sync finishes. |
+| Red X · Clear finished | Remove **all** Completed, Skipped, Failed and Cancelled rows immediately, including rows linked to active channel jobs. Preserve Pending/Running rows, captures, and compact channel outcome counts. Cleared failed rows cannot be retried from history; add their URLs or queue the channel again. |
 | Channels → Cancel sync | Stop discovery and cancel downloads belonging only to that sync that have not started. Shared batch downloads remain. An active video is allowed to finish before the channel unlocks. |
 
-Video states are Pending, Running, Completed, Skipped, Failed, or Cancelled. Skipped includes members-only videos and videos without eligible original English captions. Failures remain visible and retryable but do not permanently lock a channel. After failed discovery, queue the channel again. An empty channel can complete successfully only when discovery returns no extractor warnings.
+Every row has a colored emoji-style badge and text: amber **Pending**, blue **Downloading** (persisted as Running), green **Completed**, gray **Skipped**, red **Failed**, and a muted-red **Cancelled** X. Vector-backed colors render reliably in Windows PowerShell/WPF without depending on color-emoji font support. Button icons distinguish Start, Pause, Remove, Retry and Clear. Skipped includes members-only videos and videos without eligible original English captions. Failures remain visible and retryable but do not permanently lock a channel. After failed discovery, queue the channel again. An empty channel can complete successfully only when discovery returns no extractor warnings.
 
 Ordinary failures permit later work. Exhausted HTTP 429 retries pause the entire scheduler and return the affected discovery/video to Pending. The shared cooldown must expire before requests resume. Sorting the video table changes presentation only; manual queue reordering is not provided.
 
@@ -48,6 +48,10 @@ Only one application window may own the runner. Do not edit runtime JSON or dele
 
 ## Implementation
 
-`Corpus.Queue.psm1` stores video `Items` and channel `SyncJobs`. Video `JobIds` link shared work; `Batch` retains an independent batch claim. Discovery uses the same channel parser as CLI sync with `DiscoverOnly`, preserving channel names, IDs, raw listings, membership hints, and ownership checks. Each downloaded video still goes through `Corpus.Operations.psm1` and its run logging. CLI actions continue to execute directly under the same exclusive corpus lock.
+`Corpus.Queue.psm1` stores video `Items`, channel `SyncJobs`, and a discovery group (`DiscoveryJobIds`) for progress. Legacy queue files gain these fields in memory. Each job stores `ClearedResults` counts for completed, skipped, failed and cancelled children. Clear finished adds counts under the same queue/configuration lock before atomically removing terminal rows. Finalization uses both remaining rows and these counts, so clearing or restarting cannot turn partial work into a successful full sync. Video `JobIds` link shared work; `Batch` retains an independent batch claim. Discovery uses the same channel parser as CLI sync with `DiscoverOnly`, preserving channel names, IDs, raw listings, membership hints, and ownership checks. Each downloaded video still goes through `Corpus.Operations.psm1` and its run logging. CLI actions continue to execute directly under the same exclusive corpus lock.
 
 `data/queue-runner.lock` owns scheduling; `data/corpus.lock` excludes competing captures/exports. Dependency mutexes prevent executable replacement during acquisition. `data/config.lock` serializes short queue/subject transactions, with no network request inside it. Completion reloads the latest queue under this lock to preserve concurrent additions, removals, and cancellation requests.
+
+## Screenshots and repeatable validation
+
+See [Validation](VALIDATION.md) for the full offline and WPF test commands. `Invoke-DiscoveryQueueIntegration.ps1` exercises the real controls through both phases, pauses an active discovery and an active download, verifies status badges, clears terminal rows while channel jobs are active, and confirms partial outcomes survive. `Update-Screenshots.ps1` regenerates every documented application screenshot from an isolated sample corpus.

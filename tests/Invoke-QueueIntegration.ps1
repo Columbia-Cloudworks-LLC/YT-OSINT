@@ -37,7 +37,7 @@ $check={
         1 {
             if($state.Queue.Items.Count -ne 2){throw 'Batch did not produce two visible queue items.'}
             if($ui.RenameSubject.IsEnabled -or $ui.RemoveSubject.IsEnabled){throw 'Queued subject rename was not disabled.'}
-            Click $ui.QueueStart;$state.QueueTestStage=2
+            Click $ui.QueueToggle;$state.QueueTestStage=2
         }
         2 {
             if(-not (Test-Path (Join-Path $root started.txt))){return}
@@ -64,7 +64,7 @@ $check={
         }
         7 {
             if($ui.SearchGrid.Visibility -ne 'Visible'){throw 'Corpus search did not finish while downloading.'}
-            Click $ui.QueuePause;$state.QueueTestStage=8
+            Click $ui.QueueToggle;$state.QueueTestStage=8
         }
         8 {
             if(-not (Get-CorpusQueue $root).Paused){throw 'Pause request was not persisted.'}
@@ -75,7 +75,7 @@ $check={
             $q=Get-CorpusQueue $root
             if($q.Items[0].Status -ne 'Completed' -or $q.Items[1].Status -ne 'Pending'){throw 'Pause did not finish exactly one item.'}
             Remove-Item (Join-Path $root release.txt);Remove-Item (Join-Path $root started.txt)
-            Click $ui.QueueStart;$state.QueueTestStage=10
+            Click $ui.QueueToggle;$state.QueueTestStage=10
         }
         10 {
             if(-not (Test-Path (Join-Path $root started.txt))){return}

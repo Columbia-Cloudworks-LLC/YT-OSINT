@@ -13,7 +13,7 @@ $adapter=@'
 function script:Sync-CorpusChannel {
     param($Context,$Url,$SubjectId,$SubjectName,$Run,[switch]$DiscoverOnly)
     if($Url -match 'lessbitter'){
-        if((Get-CorpusQueue $Context.Root).SyncJobs[0].Status -notin @('Completed','Cancelled','Partial')){throw 'Second channel started before the first finished.'}
+        if(@((Get-CorpusQueue $Context.Root).Items | Where-Object Status -eq Running).Count){throw 'Discovery overlapped an active download.'}
         return [pscustomobject]@{ChannelId='UC2234567890123456789012';Entries=@()}
     }
     [pscustomobject]@{ChannelId='UC1234567890123456789012';Entries=@([pscustomobject]@{id='abcDEF12_-3';title='A shared video'},[pscustomobject]@{id='xyzDEF12_-3';title='A pending video'})}
@@ -62,7 +62,7 @@ $check={
             if($ui.SyncSelected.IsEnabled -or $ui.RenameSubject.IsEnabled){throw 'Queued discovery did not lock channel or subject'}
             if($ui.QueueGrid.Items.Count){throw 'Discovery job leaked into video queue'}
             Save-UiScreenshot $window channels
-            Click $ui.QueueStart;$state.UnifiedStage=3
+            Click $ui.QueueToggle;$state.UnifiedStage=3
         }
         3 {
             if(-not (Test-Path (Join-Path $root started.txt))){return}

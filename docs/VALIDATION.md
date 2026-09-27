@@ -10,9 +10,11 @@ powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-View
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-QueueIntegration.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-SubjectsIntegration.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-UnifiedQueueIntegration.ps1
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-SelectionStorageIntegration.ps1
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-DiscoveryQueueIntegration.ps1
 ```
 
-GitHub Actions runs syntax parsing, the fixture suite, and all four WPF scripts on Windows. Tests use `tests/fixtures/config.json`, not the user's live subject configuration. No YouTube requests are made by these checks.
+GitHub Actions runs syntax parsing, the fixture suite, and all six WPF scripts on Windows. Tests use `tests/fixtures/config.json`, not the user's live subject configuration. No YouTube requests are made by these checks.
 
 The fixture suite covers configuration and identity, atomic writes, concurrent subject updates, VTT normalization, subtitle selection, cached transcript reuse, searches, timestamp links, acquisition failures, members-only skips, Excel structure, run accounting, persistent rate-limit scheduling, dependency verification, rollback/recovery, and maintenance locks.
 
@@ -60,6 +62,24 @@ Local searches scan per-video JSON; there is no database index. Viewer rows are 
 
 ## Unified scheduler verification
 
-Channel tests cover subject protection before discovery, duplicate job rejection, real nested-listing parsing without inline downloads, saved channel names, shared batch ownership, cancellation with an active item, serial channel jobs, failed discovery continuation, rate-limit pause, interrupted discovery recovery, legacy queue migration, and independent video retry after a failed sync.
+Channel tests cover subject protection before discovery, duplicate job rejection, real nested-listing parsing without inline downloads, saved channel names, shared batch ownership, cancellation with an active item, discovery of all queued channels before videos, channels added during active downloads, failed discovery continuation, rate-limit pause, interrupted discovery recovery, legacy queue migration, and independent video retry after a failed sync.
 
-`Invoke-UnifiedQueueIntegration.ps1` drives the real Subjects, Channels, and Video Queue controls against an isolated fixture corpus. It verifies A–Z/Z–A sorting without changing selection, both channel label states, queueing another channel while downloading, subject-bound batch imports, duplicate suppression, selective cancellation, and eventual channel unlock. Acquisition is simulated; scheduling, persistence, locking, and UI workers are real. Run with `-ScreenshotDirectory .\docs\screenshots` to capture the three README screenshots without exposing personal configuration.
+`Invoke-UnifiedQueueIntegration.ps1` drives the real Subjects, Channels, and Video Queue controls against an isolated fixture corpus. It verifies A–Z/Z–A sorting without changing selection, both channel label states, queueing another channel while downloading, subject-bound batch imports, duplicate suppression, selective cancellation, and eventual channel unlock. Acquisition is simulated; scheduling, persistence, locking, and UI workers are real. The dedicated screenshot generator below replaces every documented screenshot without exposing personal configuration.
+
+## Queue redesign and storage acceptance
+
+The fixture suite verifies discovery before even older batch URLs, shared video deduplication across discovered channels, discovery of channels added mid-download, and safe pause/resume between discoveries. Clear-finished tests cover every terminal state, shared active jobs, repeated clearing, persistence/reload, accurate failure totals, preserved previous full-sync timestamps, and successful finalization after successful history is cleared. Progress tests distinguish discovery counts from visible video counts.
+
+`Invoke-DiscoveryQueueIntegration.ps1` tests the actual WPF Start/Pause/Pausing button, its bottom-right placement and action icons, discovery/download progress, every colored row badge, and clearing terminal rows during active downloads. It checks that no channel discovery is left behind the completed downloads and that cleared failures still produce partial channel outcomes.
+
+`Invoke-SelectionStorageIntegration.ps1` verifies multi-selection retention during refresh, bulk pending removal, preservation of unsaved subject edits, freshness preferences saved to an isolated profile, switch/create, verified relocation, and a real restart into the moved corpus with the queue paused. Storage fixtures test validation, source/destination runner locks, copied-file verification, and rejection of an incomplete copy.
+
+## Updating all screenshots
+
+```powershell
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Update-Screenshots.ps1
+```
+
+This loads the actual application with isolated sample subjects, channels and queue states. It replaces `docs/screenshot.png`, `docs/dependencies.png`, and the Subjects, Channels, Queue, Discovery and Storage screenshots under `docs/screenshots/`. No live YouTube requests, dependency release checks, or personal configuration are used. The dependency page intentionally shows unqueried sample rows. Inspect the resulting images for clipping, stale controls, misleading status and private data before committing.
+
+For this project, a request to make changes includes implementation, tests, all affected documentation, regeneration/review of all documented screenshots, and commit/push. See the repository's `AGENTS.md`.

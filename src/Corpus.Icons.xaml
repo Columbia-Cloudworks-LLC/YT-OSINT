@@ -32,4 +32,9 @@
       <GeometryDrawing Brush="#217346" Geometry="M 12,14 H 18 V 11 L 24,16.5 L 18,22 V 19 H 12 Z"/>
     </DrawingGroup></DrawingImage.Drawing>
   </DrawingImage>
+  <DrawingImage x:Key="Play"><DrawingImage.Drawing><GeometryDrawing Brush="#23844A" Geometry="M 4,2 L 21,12 L 4,22 Z"/></DrawingImage.Drawing></DrawingImage>
+  <DrawingImage x:Key="Pause"><DrawingImage.Drawing><GeometryDrawing Brush="#A96900" Geometry="M 4,2 H 10 V 22 H 4 Z M 15,2 H 21 V 22 H 15 Z"/></DrawingImage.Drawing></DrawingImage>
+  <DrawingImage x:Key="Clear"><DrawingImage.Drawing><GeometryDrawing Geometry="M 4,4 L 20,20 M 20,4 L 4,20"><GeometryDrawing.Pen><Pen Brush="#C52A35" Thickness="4" StartLineCap="Round" EndLineCap="Round"/></GeometryDrawing.Pen></GeometryDrawing></DrawingImage.Drawing></DrawingImage>
+  <DrawingImage x:Key="Remove"><DrawingImage.Drawing><DrawingGroup><GeometryDrawing Brush="#A94350"><GeometryDrawing.Geometry><EllipseGeometry Center="12,12" RadiusX="11" RadiusY="11"/></GeometryDrawing.Geometry></GeometryDrawing><GeometryDrawing Geometry="M 6,12 H 18"><GeometryDrawing.Pen><Pen Brush="White" Thickness="3"/></GeometryDrawing.Pen></GeometryDrawing></DrawingGroup></DrawingImage.Drawing></DrawingImage>
+  <DrawingImage x:Key="Retry"><DrawingImage.Drawing><DrawingGroup><GeometryDrawing Geometry="M 19,7 A 9,9 0 1 0 21,15"><GeometryDrawing.Pen><Pen Brush="#176BC1" Thickness="3" StartLineCap="Round" EndLineCap="Round"/></GeometryDrawing.Pen></GeometryDrawing><GeometryDrawing Brush="#176BC1" Geometry="M 13,7 L 22,9 L 22,0 Z"/></DrawingGroup></DrawingImage.Drawing></DrawingImage>
 </ResourceDictionary>

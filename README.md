@@ -77,7 +77,7 @@ Cooldown deadlines and retry counts are saved in `%LOCALAPPDATA%\YT-OSINT\youtub
 
 1. **Subjects:** choose a subject in the left pane, sorted A–Z by default with a Z–A option. **Add subject** prompts for a name and selects it immediately. Manage its channels in the upper right pane and paste batches of video URLs in the lower pane. **Add URLs to queue** captures that subject's ID for the batch. Rename/remove are locked while the subject owns queued videos or channel jobs. Removal archives the subject without changing captured files and also requires capture/export work to be idle.
 2. **Channels:** select a channel on the left to see its metadata, statistics, and sync controls on the right. Before capture, the label comes from its URL followed by the subject in parentheses; afterward the saved channel name is used. **Queue channel sync** and **Queue all channels** feed the shared scheduler. Switching channels never changes a running job. A channel's sync button stays disabled until its job finishes or its downloads are cancelled. **Cancel sync** cancels its waiting downloads while preserving independent batch requests; an active video finishes safely.
-3. **Video Queue:** contains only videos from batch imports and channel discovery. **Start / resume** processes queued work sequentially; additions while running are picked up automatically. Paused queues remain paused until resumed. Duplicate pending/running video IDs share one download. The next channel discovery waits for the previous sync's downloads to finish. Pause, cancel, remove pending items, retry failures, and clear finished history here. See the [queue guide](docs/QUEUE.md) for ownership and cancellation rules.
+3. **Video Queue:** contains only videos from batch imports and channel discovery. The bottom-right **▶ Start / ⏸ Pause** button controls the entire queue. Start discovers every queued channel, then downloads videos sequentially; a newly added channel is discovered after the current item and before the next video. Paused queues remain paused until resumed. Duplicate pending/running video IDs share one download. Every queued channel is listed before any video download starts. Queue-local progress distinguishes channel discovery from video processing. Colored status badges mark each row. Remove selected pending items, retry a failed/cancelled row, or use **Clear finished** to remove all completed, skipped, cancelled, and failed rows while preserving captures and channel results. See the [queue guide](docs/QUEUE.md) for ownership and cancellation rules.
 4. **Corpus:** use **Find videos** to filter metadata or **Find in transcripts** to search captions, with optional subject/channel/video/date filters. Both use the same literal query field. Click a column header to sort ascending; click again for descending. Double-click a video or search result, or select it and press **Read transcript**. There is no separate Search tab. Button icons distinguish the transcript reader, YouTube links, Excel, and workbook export; text labels remain visible. The bundled vector icons work offline and scale with Windows display settings.
 5. **Transcript viewer:** read the full timestamped transcript. Type literal text to highlight every occurrence within each segment, ignoring case. **Previous match** and **Next match** navigate matching segments and wrap around; **Show matching segments only** hides other rows. Clear the query to restore the full transcript. Double-click a segment or use **Open selected timestamp** to open YouTube. Missing transcripts show an empty-state message. The viewer renders visible rows on demand, and loads only the selected video's saved transcript.
 6. **Excel export:** GUI imports save the corpus without rebuilding Excel by default. Use **Export Excel workbook** when needed, or enable **Also export Excel after imports** for the current session. Queued items remember the export and refresh choices made when they were added. CLI imports retain automatic export. Excel is an optional view of the canonical JSON files.
@@ -86,13 +86,17 @@ Cooldown deadlines and retry counts are saved in `%LOCALAPPDATA%\YT-OSINT\youtub
 
 ### Current interface
 
-Fresh screenshots from the real WPF application with isolated sample data and simulated downloads:
+Fresh screenshots from the real WPF application with isolated sample data and simulated queue states (no personal corpus or network requests):
 
 ![Subjects sorted alphabetically with channels above the subject-specific batch importer](docs/screenshots/subjects.png)
 
 ![Channel list and selected channel details with queued sync controls](docs/screenshots/channels.png)
 
-![One video queue shared by channel sync and batch import](docs/screenshots/queue.png)
+![Queue-local progress, colored status badges, and one bottom-right Pause control](docs/screenshots/queue.png)
+
+![All queued channels are discovered before video downloading begins](docs/screenshots/discovery.png)
+
+![Profile storage settings with move and switch options](docs/screenshots/storage.png)
 
 Removed subjects leave the managed list and future channel syncs. Their IDs, final names, and historical associations stay in `config.json` under `archivedSubjects`; their captures remain searchable through the Corpus subject filter, marked **(archived)**. A new subject with the same name receives a fresh ID and no inherited channels. Reimporting an already captured video preserves its archived subject assignment, even when a new subject is selected; new video IDs can belong to the new subject. Old failed queue history cannot revive a removed subject. Removal does not delete or rewrite videos, transcript snapshots, channel records, or run logs.
 
@@ -100,13 +104,15 @@ Members-only videos are recorded as **SkippedMembersOnly**, counted separately, 
 
 Queue processing has its own background PowerShell runspace, separate from subject edits, corpus refreshes, and searches. WPF's dispatcher timer transfers progress and results. You can append or remove pending items and edit unrelated subjects during downloads. While the queue worker is active, more channel syncs can be queued; manual exports and dependency maintenance wait for it to become idle. External processes use asynchronous stdout/stderr readers implemented in a small C# helper loaded by PowerShell. They create no console windows and use Windows-compatible structured argument quoting. Native command logs redact URLs and do not emit signed caption URLs.
 
-The main Cancel button cancels the current foreground operation, such as search or channel sync. **Cancel current and pause** cancels the active queue item and keeps the remaining pending items. Both terminate an active child process tree where practical. Completed atomic commits survive. Excel cancellation is checked between rows/stages; the final EPPlus save is not interruptible mid-write. The application stays interactive and honors cancellation at the next safe boundary. Closing during work requests cancellation and waits for safe cleanup. Only one capture/export writer and one queue runner can operate on a corpus. Queue and subject changes share a separate short file lock, so downloads do not block configuration edits. Closing during a queued import returns the interrupted item to Pending and saves the queue paused. Abandoned Running items are recovered to Pending when no queue runner owns them; the next launch requires an explicit resume.
+The main Cancel button applies to a foreground operation such as search. The queue has one **Start / Pause** control at its bottom right: Pause finishes the active discovery or video safely, shows **Pausing…**, and starts nothing else. Channel-specific cancellation remains available on Channels. Closing can terminate the active child process tree where practical. Completed atomic commits survive. Excel cancellation is checked between rows/stages; the final EPPlus save is not interruptible mid-write. The application stays interactive and honors cancellation at the next safe boundary. Closing during work requests cancellation and waits for safe cleanup. Only one capture/export writer and one queue runner can operate on a corpus. Queue and subject changes share a separate short file lock, so downloads do not block configuration edits. Closing during a queued import returns the interrupted item to Pending and saves the queue paused. Abandoned Running items are recovered to Pending when no queue runner owns them; the next launch requires an explicit resume.
 
 ## Queue selection, status, and storage settings
 
-The Video Queue supports Ctrl+click to toggle rows, Shift+click or Shift+Up/Down to select a range, and Ctrl+A to select all rows. **Remove selected pending items** removes only work that has not started; active/completed items and captured files are preserved. A selection count and removal summary show what happened. Selections survive background queue refreshes. Retry remains a single-item action.
+Start lists **all** queued channels before processing any video, including earlier batch URLs. Discovery and downloads stay sequential. New channels added during a download are listed after that item and before the next video. Discovery failures are reported and resolved without a later automatic retry; rate limits pause the queue and leave discovery pending. Queue-local progress shows channels listed/resolved during discovery, then finished/pending/downloading/failed counts for the visible video list. Clearing rows changes those visible-list counts. These counts are not an ETA.
 
-Removing a video from a channel sync permanently marks that attempt as a **Partial channel import**, including every channel job sharing that video. Cancelled rows remain in history for accounting. A partial import never advances the last successful full-sync timestamp; retrying an omitted video independently does not repair that original attempt. A future full sync may include omitted videos again.
+The Video Queue supports Ctrl+click to toggle rows, Shift+click or Shift+Up/Down to select a range, and Ctrl+A to select all rows. **Remove selected pending items** removes only work that has not started; active/completed items and captured files are preserved. A selection count and removal summary show what happened. Selections survive background queue refreshes. Retry remains a single-item action. **Clear finished** removes Completed, Skipped, Failed, and Cancelled rows immediately—even when an active channel job references them. Pending and Running rows remain. Cleared failures no longer offer a row-level retry; queue their URLs or channel again if needed. Their failure counts still prevent a false successful full sync.
+
+Removing a video from a channel sync permanently marks that attempt as a **Partial channel import**, including every channel job sharing that video. Cancelled rows remain visible until **Clear finished**; their outcomes are then retained in compact channel-job counts for accounting. A partial import never advances the last successful full-sync timestamp; retrying an omitted video independently does not repair that original attempt. A future full sync may include omitted videos again.
 
 Channel lists show text and icons for queued, syncing, paused, partial, failed, cancelled, up-to-date, stale, and never-synced states. Activity and freshness are separate: a failed or partial attempt retains the date of the previous full sync. Locks explain why editing is unavailable. Subjects summarize active work and channel freshness. Unavailable English transcripts and members-only skips retain their existing handling; they are accounted-for results, not user-removed videos.
 
@@ -134,7 +140,8 @@ src/Corpus.RateLimit.psm1     Persistent pacing, cooldown, and bounded retries
 src/Corpus.Transcript.psm1    VTT parsing and rolling-caption normalization
 src/Corpus.Excel.psm1         ImportExcel/EPPlus workbook generation
 src/Corpus.Operations.psm1    Locking, run accounting, cancellation orchestration
-src/Corpus.Queue.psm1         Durable batch queue, claiming, controls and recovery
+src/Corpus.Queue.psm1         Discovery-first queue, durable results, controls and recovery
+src/Corpus.Settings.psm1      Profile preferences, storage migration and sync freshness
 src/Corpus.Dependencies.psm1  Release checks, caching, staging, module updates
 src/Corpus.DependencyTransaction.psm1  Native pair commit, backup, rollback/recovery
 src/Corpus.Process.*          Native execution and async output capture
@@ -196,7 +203,7 @@ Install-Module Pester -RequiredVersion 4.10.1 -Scope CurrentUser
 .\tests\Run-Tests.ps1
 ```
 
-The deterministic suite uses local metadata/VTT fixtures; it does not access YouTube or install native dependencies. It covers configuration, relationships, identifiers, parser edge cases, rolling captions, timestamp links, repeated acquisition via a mocked external adapter, raw deduplication/history, failure persistence and continuation, search context, process output, cancellation/run records, and real XLSX content/locking. The queue tests also cover deduplication, atomic validation, subject locks, concurrent configuration writers, pause/cancel/retry/recovery, rate-limit halting, and cached imports under the queue writer lock. GitHub Actions runs the suite and all four WPF integration scripts on Windows.
+The deterministic suite uses local metadata/VTT fixtures; it does not access YouTube or install native dependencies. It covers configuration, relationships, identifiers, parser edge cases, rolling captions, timestamp links, repeated acquisition via a mocked external adapter, raw deduplication/history, failure persistence and continuation, search context, process output, cancellation/run records, and real XLSX content/locking. The queue tests also cover deduplication, atomic validation, subject locks, concurrent configuration writers, pause/cancel/retry/recovery, rate-limit halting, and cached imports under the queue writer lock. GitHub Actions runs the suite and all six WPF integration scripts on Windows.
 
 Actual WPF interaction tests (local fixtures; no YouTube requests):
 
@@ -205,9 +212,19 @@ powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-View
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-QueueIntegration.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-SubjectsIntegration.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-UnifiedQueueIntegration.ps1
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-SelectionStorageIntegration.ps1
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-DiscoveryQueueIntegration.ps1
 ```
 
-The unified integration test verifies subject sorting, persistent channel labels, selecting/enqueueing a second channel during a download, batch/sync deduplication, cancellation, and channel unlock. Add `-ScreenshotDirectory .\docs\screenshots` to regenerate the sample screenshots.
+The unified integration test verifies subject sorting, persistent channel labels, selecting/enqueueing a second channel during a download, batch/sync deduplication, cancellation, and channel unlock. The discovery integration also checks the discovery barrier, Start/Pause/Pausing states, colored badges, clearing every terminal state during active work, and retained partial-sync results. The storage integration checks selection retention, profile settings, relocation and restart.
+
+Regenerate **every** documented application screenshot (including the overview, dependencies, subjects, channels, download queue, discovery, and storage):
+
+```powershell
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Update-Screenshots.ps1
+```
+
+This uses an isolated fixture corpus and does not check dependency releases or download YouTube data. The dependency screenshot intentionally shows an unchecked sample session.
 
 The queue integration test holds a simulated download open while exercising real controls for subject creation/rename, adding/removing URLs, corpus search, pause/resume, and window-close recovery. The simulation replaces only acquisition; queue storage, locks, and GUI workers are real.
 
@@ -234,7 +251,7 @@ powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\YouTubeCorpus.ps1
 ## Troubleshooting and limits
 
 - **Subject rename/removal locked:** finish, cancel, or remove every Pending/Running item for that subject. Pausing keeps pending names locked. Other subjects can still be edited.
-- **Queue paused after restart:** select Start / resume. Downloads never resume automatically; completed captures are reused.
+- **Queue paused after restart:** select **Start**. Downloads never resume automatically; completed captures are reused.
 - **Another queue is running:** use the window that owns the queue, or wait for it to finish. Do not delete lock files to bypass an active worker.
 - **Failed queue item:** review its Details and Logs, then use Retry selected. Ordinary failures do not stop subsequent items; persistent rate limiting does.
 - **HTTP 429:** let the cooldown complete; repeated restarts do not clear it. After retries are exhausted, wait at least 8 minutes before starting another sync. Saved transcripts are reused by default.

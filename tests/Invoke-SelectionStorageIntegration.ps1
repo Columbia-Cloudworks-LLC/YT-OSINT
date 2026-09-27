@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param()
 $ErrorActionPreference='Stop'
 $project=Split-Path $PSScriptRoot -Parent
@@ -43,7 +43,7 @@ $check={
             $ui.StorageRoot.Text=$destination;$ui.StorageSwitch.IsChecked=$true;Click $ui.SaveStorage;$state.SelectionStage=4
         }
         4 {
-            if(-not $state.RestartRequired -or $ui.StorageRestart.Visibility -ne 'Visible' -or $ui.QueueStart.IsEnabled){throw 'Location change did not require a safe restart'}
+            if(-not $state.RestartRequired -or $ui.StorageRestart.Visibility -ne 'Visible' -or $ui.QueueToggle.IsEnabled){throw 'Location change did not require a safe restart'}
             if((Get-CorpusUserSettings $profile).CorpusRoot -ne $destination){throw 'New location was not saved'}
             if(@((Get-CorpusConfig $destination).subjects).Count){throw 'Switch copied the old corpus unexpectedly'}
             if((Get-CorpusQueue $root).Items.Count -ne 1){throw 'Switch changed the original queue'}

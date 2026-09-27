@@ -19,7 +19,7 @@
 <TextBlock x:Name="SubjectLockNotice" Margin="8" Foreground="#815A16" TextWrapping="Wrap"/>
 <WrapPanel><TextBox x:Name="ChannelUrl" Width="360" ToolTip="HTTPS YouTube channel URL"/><Button x:Name="AddChannel" Content="Add channel"/><Button x:Name="RemoveChannel" Content="Remove selected channel"/></WrapPanel>
 <TextBlock Text="Removing a subject preserves its captured videos and transcripts." Margin="8" TextWrapping="Wrap"/>
-</StackPanel><DataGrid x:Name="SubjectChannels" AutoGenerateColumns="False" Margin="4,12,4,4"><DataGrid.Columns><DataGridTextColumn Header="Channel" Binding="{Binding Url}" Width="*"/><DataGridTextColumn Header="Sync status" Binding="{Binding StatusLabel}" Width="240"/><DataGridTextColumn Header="Last full sync" Binding="{Binding LastSuccessfulSync}" Width="160"/></DataGrid.Columns></DataGrid></DockPanel><GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch" Background="#D7DFEB"/><StackPanel Grid.Row="2"><TextBlock Text="Batch video imports" FontSize="22" Margin="4,0,4,8"/>
+</StackPanel><DataGrid x:Name="SubjectChannels" AutoGenerateColumns="False" Margin="4,12,4,4"><DataGrid.Columns><DataGridTextColumn Header="Channel" Binding="{Binding Url}" Width="*"/><DataGridTextColumn Header="Sync status" Binding="{Binding StatusLabel}" Width="240"><DataGridTextColumn.ElementStyle><Style TargetType="TextBlock"><Setter Property="TextWrapping" Value="Wrap"/><Setter Property="Margin" Value="4"/></Style></DataGridTextColumn.ElementStyle></DataGridTextColumn><DataGridTextColumn Header="Last full sync (UTC)" Binding="{Binding LastSuccessfulSync}" Width="160"/></DataGrid.Columns></DataGrid></DockPanel><GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch" Background="#D7DFEB"/><StackPanel Grid.Row="2"><TextBlock Text="Batch video imports" FontSize="22" Margin="4,0,4,8"/>
 <TextBlock Text="Paste one video URL per line. Downloads belong to the selected subject." Margin="4"/>
 <TextBox x:Name="VideoUrl" Height="80" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap" ToolTip="One HTTPS YouTube video URL per line"/>
 
@@ -34,15 +34,22 @@
 </Grid></TabItem>
 <TabItem x:Name="QueueTab" Header="Video Queue"><DockPanel Margin="16">
 <StackPanel DockPanel.Dock="Top">
-<WrapPanel><Button x:Name="QueueStart" Content="Start / resume"/><Button x:Name="QueuePause" Content="Pause after current"/><Button x:Name="QueueCancel" Content="Cancel current and pause"/><Button x:Name="QueueRemove" Content="Remove selected pending items"/><Button x:Name="QueueRetry" Content="Retry selected"/><Button x:Name="QueueClear" Content="Clear finished"/></WrapPanel>
-<TextBlock x:Name="QueueSelection" Margin="8,0"/><TextBlock x:Name="QueueStatus" Text="Queue paused" Margin="8" TextWrapping="Wrap"/>
+<TextBlock Text="Download queue" FontSize="22" FontWeight="SemiBold" Margin="4,0,4,8"/>
+<TextBlock x:Name="QueueStatus" Text="Queue paused" Margin="4" TextWrapping="Wrap"/>
+<ProgressBar x:Name="QueueProgress" Height="8" Margin="4,6,4,8" Foreground="#176BC1"/>
+<TextBlock x:Name="QueueActivity" Text="Start lists every queued channel before downloading videos." Margin="4,0,4,8" TextWrapping="Wrap" Foreground="#52657A"/>
+<WrapPanel><Button x:Name="QueueRemove" Content="Remove selected pending items"/><Button x:Name="QueueRetry" Content="Retry selected"/><Button x:Name="QueueClear" Content="Clear finished" ToolTip="Clear completed, skipped, cancelled and failed rows. Pending/running work and captured files are preserved."/></WrapPanel>
+<TextBlock x:Name="QueueSelection" Margin="8,4"/>
 </StackPanel>
-<TextBlock DockPanel.Dock="Bottom" Text="Pending items can be removed. Names of subjects with pending or active items are locked. Saved queues reopen paused." Margin="4,10" TextWrapping="Wrap"/>
+<Grid DockPanel.Dock="Bottom" Margin="4,10,4,0"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+<TextBlock Text="Clear finished removes history only. Pause finishes the active item safely. Saved queues reopen paused." TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,20,0"/>
+<Button x:Name="QueueToggle" Grid.Column="1" Content="Start" MinWidth="120" ToolTip="Start the entire queue. Queued channels are listed before video downloads."/>
+</Grid>
 <DataGrid x:Name="QueueGrid" SelectionMode="Extended" SelectionUnit="FullRow" AutoGenerateColumns="False" Margin="4"><DataGrid.Columns>
-<DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="95"/>
+<DataGridTemplateColumn Header="Status" SortMemberPath="Status" Width="140"><DataGridTemplateColumn.CellTemplate><DataTemplate><StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4" ToolTip="{Binding Detail}"><Border Width="20" Height="20" CornerRadius="10" Background="{Binding StatusColor}" Margin="0,0,7,0"><TextBlock Text="{Binding StatusGlyph}" Foreground="White" FontFamily="Segoe UI Symbol" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="{Binding StatusLabel}" VerticalAlignment="Center"/></StackPanel></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
 <DataGridTextColumn Header="Video" Binding="{Binding Title}" Width="240"/>
 <DataGridTextColumn Header="Subject" Binding="{Binding SubjectName}" Width="150"/>
-<DataGridTextColumn Header="URL" Binding="{Binding Url}" Width="280"/>
+<DataGridTextColumn Header="URL" Binding="{Binding Url}" Width="250"/>
 <DataGridTextColumn Header="Details" Binding="{Binding Detail}" Width="*"/>
 </DataGrid.Columns></DataGrid>
 </DockPanel></TabItem>

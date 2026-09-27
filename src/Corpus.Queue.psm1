@@ -3,9 +3,11 @@ function Get-CorpusQueue {
     param([string]$Root)
     if(Test-Path -LiteralPath (Join-Path $Root '.yt-osint-migration-incomplete')){throw 'This corpus copy is incomplete. Use the original corpus.'}
     $queue=Read-CorpusJson (Join-Path $Root 'data/queue.json')
-    if(-not $queue){return [pscustomobject]@{SchemaVersion=1;Paused=$true;Items=@();SyncJobs=@()}}
+    if(-not $queue){$queue=[pscustomobject]@{SchemaVersion=1;Paused=$true;Items=@();SyncJobs=@()}}
     if($queue.SchemaVersion -ne 1){throw 'Unsupported queue format.'}
     if(-not $queue.PSObject.Properties['SyncJobs']){$queue | Add-Member NoteProperty SyncJobs @()}
+    if(-not $queue.PSObject.Properties['DiscoveryJobIds']){$queue | Add-Member NoteProperty DiscoveryJobIds @($queue.SyncJobs | Where-Object Status -in @('Pending','Discovering','Downloading','Cancelling') | ForEach-Object {$_.Id})}
+    foreach($job in $queue.SyncJobs){if(-not $job.PSObject.Properties['ClearedResults']){$job | Add-Member NoteProperty ClearedResults ([pscustomobject]@{Completed=0;Skipped=0;Failed=0;Cancelled=0})}}
     foreach($item in $queue.Items){
         if(-not $item.PSObject.Properties['JobIds']){$item | Add-Member NoteProperty JobIds @()}
         if(-not $item.PSObject.Properties['Batch']){$item | Add-Member NoteProperty Batch $true}
@@ -108,7 +110,19 @@ function Update-CorpusQueue {
     try {
         $queue=Get-CorpusQueue $Root
         if($Action -eq 'Pause'){$queue.Paused=$true}
-        elseif($Action -eq 'ClearFinished'){$queue.Items=@($queue.Items | Where-Object {$_.Status -in @('Pending','Running') -or @($_.JobIds | Where-Object {$_ -in @($queue.SyncJobs | Where-Object Status -in @('Pending','Discovering','Downloading','Cancelling') | Select-Object -ExpandProperty Id)}).Count})}
+        elseif($Action -eq 'ClearFinished'){
+            $jobsById=@{};foreach($job in $queue.SyncJobs){$jobsById[$job.Id]=$job}
+            foreach($item in $queue.Items){
+                if($item.Status -in @('Pending','Running')){continue}
+                foreach($jobId in $item.JobIds){
+                    if($jobsById.ContainsKey($jobId)){
+                        $counts=$jobsById[$jobId].ClearedResults
+                        if($counts.PSObject.Properties[$item.Status]){$counts.($item.Status)++}
+                    }
+                }
+            }
+            $queue.Items=@($queue.Items | Where-Object Status -in @('Pending','Running'))
+        }
         else {
             $matches=@($queue.Items | Where-Object Id -eq $Id)
             if(-not $matches.Count){throw 'This queue item no longer exists.'};$item=$matches[0]
@@ -151,7 +165,7 @@ function Invoke-CorpusQueue {
                 $pending=@($queue.Items | Where-Object Status -eq Pending | Select-Object -First 1)
                 $discover=$null
                 $jobs=@($queue.SyncJobs | Where-Object Status -eq Pending | Select-Object -First 1)
-                if($jobs.Count -and -not @($queue.SyncJobs | Where-Object Status -in @('Discovering','Downloading','Cancelling')).Count -and (-not $pending.Count -or $jobs[0].AddedAt -lt $pending[0].AddedAt)){
+                if($jobs.Count){
                     $discover=$jobs[0];$discover.Status='Discovering';Save-CorpusQueue $Root $queue
                 }
                 if(-not $discover -and -not $pending.Count){$queue.Paused=$true;Save-CorpusQueue $Root $queue;break}
@@ -160,6 +174,7 @@ function Invoke-CorpusQueue {
                 }
                 Save-CorpusQueue $Root $queue
             } finally {$lock.Dispose()}
+            if($Shared){$Shared.Progress=@{Stage=$(if($discover){'Discovering channel'}else{'Downloading video'});Item=$(if($discover){$discover.Url}else{$item.Title});Current=0;Total=0}}
             if($discover){Invoke-CorpusQueuedDiscovery $Root $discover $Shared;continue}
             $status='Completed';$detail='';$pause=$false
             try {
@@ -196,8 +211,13 @@ function Update-CorpusSyncStates {
         if($job.Status -notin @('Downloading','Cancelling')){continue}
         $children=@($Queue.Items | Where-Object {$job.Id -in $_.JobIds})
         if(@($children | Where-Object Status -in @('Pending','Running')).Count){continue}
-        $job.Status=if((Get-CorpusProperty $job PartialImport $false) -and $job.Status -ne 'Cancelling'){'Partial'}elseif($job.Status -eq 'Cancelling' -or ($children.Count -and @($children | Where-Object Status -ne Cancelled).Count -eq 0)){'Cancelled'}elseif(@($children | Where-Object Status -in @('Failed','Cancelled')).Count){'Partial'}else{'Completed'}
-        $job.Detail="$($children.Count) videos; $(@($children | Where-Object Status -eq Failed).Count) failed; $(@($children | Where-Object Status -eq Cancelled).Count) cancelled"
+        $cleared=Get-CorpusProperty $job ClearedResults $null
+        $failed=@($children | Where-Object Status -eq Failed).Count+[int](Get-CorpusProperty $cleared Failed 0)
+        $cancelled=@($children | Where-Object Status -eq Cancelled).Count+[int](Get-CorpusProperty $cleared Cancelled 0)
+        $total=$children.Count
+        foreach($status in @('Completed','Skipped','Failed','Cancelled')){$total += [int](Get-CorpusProperty $cleared $status 0)}
+        $job.Status=if((Get-CorpusProperty $job PartialImport $false) -and $job.Status -ne 'Cancelling'){'Partial'}elseif($job.Status -eq 'Cancelling' -or ($total -gt 0 -and $cancelled -eq $total)){'Cancelled'}elseif($failed -gt 0 -or $cancelled -gt 0){'Partial'}else{'Completed'}
+        $job.Detail="$total videos; $failed failed; $cancelled cancelled"
         $job.FinishedAt=[datetime]::UtcNow.ToString('o')
         if($job.ChannelId){
             $path=Join-Path $Root "data/normalized/channels/$($job.ChannelId).json";$channel=Read-CorpusJson $path
@@ -205,7 +225,7 @@ function Update-CorpusSyncStates {
                 $videos=@(Get-CorpusVideos $Root | Where-Object ChannelId -eq $job.ChannelId)
                 $channel.TranscriptCount=@($videos | Where-Object TranscriptAvailable).Count
                 $channel.WithoutTranscripts=@($videos | Where-Object {-not $_.TranscriptAvailable}).Count
-                $channel.Failures=@($children | Where-Object Status -eq Failed).Count
+                $channel.Failures=$failed
                 $channel.MembersOnlySkipped=@($videos | Where-Object LastSyncStatus -eq SkippedMembersOnly).Count
                 $channel.Status=$job.Status;if($job.Status -eq 'Completed'){$channel.LastSync=$job.FinishedAt}
                 Write-CorpusJson $path $channel
@@ -225,6 +245,8 @@ function Add-CorpusSyncJob {
         $channelId=if($known.Count){$known[0].ChannelId}else{''}
         if(@($queue.SyncJobs | Where-Object {($_.Url -eq $Url -or ($channelId -and $_.ChannelId -eq $channelId)) -and $_.Status -in @('Pending','Discovering','Downloading','Cancelling')}).Count){return $null}
         $job=[pscustomobject]@{Id=[guid]::NewGuid().ToString('N');Url=$Url;SubjectId=$SubjectId;SubjectName=$subjects[0].name;ChannelId=$channelId;Status='Pending';Detail='Waiting for discovery';AddedAt=[datetime]::UtcNow.ToString('o');FinishedAt=$null;RefreshTranscript=[bool]$RefreshTranscript;ExportWorkbook=[bool]$ExportWorkbook}
+        if(-not @($queue.SyncJobs | Where-Object Status -in @('Pending','Discovering','Downloading','Cancelling')).Count -and -not @($queue.Items | Where-Object Status -in @('Pending','Running')).Count){$queue.DiscoveryJobIds=@()}
+        $queue.DiscoveryJobIds=@($queue.DiscoveryJobIds)+$job.Id
         $queue.SyncJobs=@($queue.SyncJobs)+$job;Save-CorpusQueue $Root $queue;return $job.Id
     } finally {$lock.Dispose()}
 }
@@ -275,4 +297,40 @@ function Invoke-CorpusQueuedDiscovery {
     } finally {$lock.Dispose()}
 }
 
-Export-ModuleMember -Function Get-CorpusQueue,Enter-CorpusQueueRunner,Remove-CorpusQueueItems,Initialize-CorpusQueue,Add-CorpusQueueUrls,Update-CorpusQueue,Invoke-CorpusQueue,Add-CorpusSyncJob,Stop-CorpusSyncJob
+function Get-CorpusQueueItemIndicator {
+    param([string]$Status)
+    switch($Status){
+        'Pending'   {return [pscustomobject]@{Glyph='…';Color='#A96900';Label='Pending'}}
+        'Running'   {return [pscustomobject]@{Glyph='▶';Color='#176BC1';Label='Downloading'}}
+        'Completed' {return [pscustomobject]@{Glyph='✓';Color='#23844A';Label='Completed'}}
+        'Skipped'   {return [pscustomobject]@{Glyph='−';Color='#657489';Label='Skipped'}}
+        'Failed'    {return [pscustomobject]@{Glyph='!';Color='#C52A35';Label='Failed'}}
+        'Cancelled' {return [pscustomobject]@{Glyph='×';Color='#A94350';Label='Cancelled'}}
+        default     {return [pscustomobject]@{Glyph='?';Color='#657489';Label=$Status}}
+    }
+}
+function Get-CorpusQueueProgress {
+    param($Queue)
+    $discoveryIds=@(Get-CorpusProperty $Queue DiscoveryJobIds @())
+    $jobs=@($Queue.SyncJobs | Where-Object {$_.Id -in $discoveryIds -or $_.Status -in @('Pending','Discovering','Downloading','Cancelling')})
+    $waiting=@($jobs | Where-Object Status -in @('Pending','Discovering')).Count
+    $discovered=$jobs.Count-$waiting
+    $pending=@($Queue.Items | Where-Object Status -eq Pending).Count
+    $running=@($Queue.Items | Where-Object Status -eq Running).Count
+    $finished=$Queue.Items.Count-$pending-$running
+    $failures=@($Queue.Items | Where-Object Status -eq Failed).Count
+    $discoveryFailures=@($jobs | Where-Object Status -eq Failed).Count
+    if($waiting){
+        $phase=if($running){'Finishing current video before discovery'}elseif($Queue.Paused -and @($jobs | Where-Object Status -eq Discovering).Count){'Pausing discovery'}elseif($Queue.Paused){'Discovery paused'}else{'Discovering channels'}
+        $text="${phase}: $discovered of $($jobs.Count) listed or resolved · $($Queue.Items.Count) videos currently listed. Downloads wait for every queued channel."
+        $maximum=[math]::Max(1,$jobs.Count);$value=$discovered
+    }else{
+        $phase=if(-not $Queue.Items.Count){'Queue empty'}elseif(-not $pending -and -not $running){'Queue complete'}elseif($Queue.Paused -and $running){'Pausing downloads'}elseif($Queue.Paused){'Queue paused'}else{'Downloading videos'}
+        $text="$phase · $finished of $($Queue.Items.Count) visible videos finished · $pending pending · $running downloading · $failures failed"
+        $maximum=[math]::Max(1,$Queue.Items.Count);$value=$finished
+    }
+    if($discoveryFailures){$text+=" · $discoveryFailures channel discovery failures (see Channels)"}
+    [pscustomobject]@{Text=$text;Phase=$phase;Maximum=$maximum;Value=$value;Pending=$pending;Running=$running;Finished=$finished;WaitingChannels=$waiting;DiscoveryTotal=$jobs.Count;DiscoveryFinished=$discovered}
+}
+
+Export-ModuleMember -Function Get-CorpusQueue,Get-CorpusQueueItemIndicator,Get-CorpusQueueProgress,Enter-CorpusQueueRunner,Remove-CorpusQueueItems,Initialize-CorpusQueue,Add-CorpusQueueUrls,Update-CorpusQueue,Invoke-CorpusQueue,Add-CorpusSyncJob,Stop-CorpusSyncJob

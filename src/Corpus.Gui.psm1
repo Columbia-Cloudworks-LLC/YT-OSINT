@@ -40,9 +40,9 @@ function Show-CorpusWindow {
         $name=$node.GetAttribute('Name','http://schemas.microsoft.com/winfx/2006/xaml')
         $ui[$name]=$window.FindName($name)
     }
-    foreach($entry in @{OpenTranscript='Transcript';OpenResult='YouTube';OpenWorkbook='Excel';Build='Export'}.GetEnumerator()){Set-CorpusButtonIcon $ui[$entry.Key] $entry.Value}
-    $state=@{Worker=$null;Handle=$null;Shared=$null;Operation='';Snapshot=$null;Ready=[bool]$SkipDependencies;Closing=$false;PendingSubject='';SmokeTicks=0;LastOutcome='Ready';CheckedStartup=(([bool]$SkipDependencies -or [bool]$SmokeTest) -and -not $SmokeCheckDependencies);RestartRequired=$false;RestartTicket=$null;DependencyRows=@();SmokeStage=0;ViewerVerified=$false;SmokeError='';QueueWorker=$null;QueueHandle=$null;QueueShared=$null;Queue=(Initialize-CorpusQueue $Root);QueueStamp='';SelectCreatedSubject=$false;QueueTicks=0;NeedsRefresh=$false}
-    $mutators=@('CreateSubject','RemoveSubject','RenameSubject','AddChannel','RemoveChannel','SyncSelected','SyncAll','Refresh','CancelSync','ImportVideo','Build','Search','FilterCorpus','RefreshChannelTranscripts','RefreshVideoTranscript','OpenTranscript','AutoExport','QueueStart','QueuePause','QueueRemove','QueueRetry','QueueClear')
+    foreach($entry in @{OpenTranscript='Transcript';OpenResult='YouTube';OpenWorkbook='Excel';Build='Export';QueueToggle='Play';QueueRemove='Remove';QueueRetry='Retry';QueueClear='Clear';SyncSelected='Retry';SyncAll='Retry';CancelSync='Remove'}.GetEnumerator()){Set-CorpusButtonIcon $ui[$entry.Key] $entry.Value}
+    $state=@{Worker=$null;Handle=$null;Shared=$null;Operation='';Snapshot=$null;Ready=[bool]$SkipDependencies;Closing=$false;PendingSubject='';SmokeTicks=0;LastOutcome='Ready';CheckedStartup=(([bool]$SkipDependencies -or [bool]$SmokeTest) -and -not $SmokeCheckDependencies);RestartRequired=$false;RestartTicket=$null;DependencyRows=@();SmokeStage=0;ViewerVerified=$false;SmokeError='';QueueWorker=$null;QueueHandle=$null;QueueShared=$null;Queue=(Initialize-CorpusQueue $Root);QueueStamp='';SelectCreatedSubject=$false;RestoringQueue=$false;QueueTicks=0;NeedsRefresh=$false}
+    $mutators=@('CreateSubject','RemoveSubject','RenameSubject','AddChannel','RemoveChannel','SyncSelected','SyncAll','Refresh','CancelSync','ImportVideo','Build','Search','FilterCorpus','RefreshChannelTranscripts','RefreshVideoTranscript','OpenTranscript','AutoExport','QueueToggle','QueueRemove','QueueRetry','QueueClear')
     $ui.Paths.Text="Current corpus folder: $Root`nWorkbook: $(Join-Path $Root 'output/YouTubeCorpus.xlsx')`nSource configuration: $(Join-Path $Root 'config.json')`nNative dependencies: $(Get-CorpusNativeRoot)"
     $state.Preferences=Get-CorpusUserSettings $UserSettingsPath
     $state.RestartRoot=$Root
@@ -76,7 +76,11 @@ function Show-CorpusWindow {
         $ui.SyncSelected.IsEnabled=($available -and [bool]$c -and -not $active)
         $ui.CancelSync.IsEnabled=($available -and $active -and $job.Status -ne 'Cancelling')
         $ui.ChannelHeading.Text=if($c){$c.DisplayName}else{'Select a channel'}
-        $ui.ChannelSyncStatus.Text=if($job){"$(if(Get-CorpusProperty $job PartialImport $false){'Partial channel import · '})$(if($job.Status -eq 'Pending'){'Queued'}else{$job.Status}) — $(if($job.Status -eq 'Downloading'){$children=@($state.Queue.Items | Where-Object {$job.Id -in $_.JobIds});"$(@($children | Where-Object Status -eq Pending).Count) pending; $(@($children | Where-Object Status -eq Running).Count) active"}else{$job.Detail})"}else{'Queue a sync to discover videos and download their transcripts.'}
+        $ui.ChannelSyncStatus.Text=if($job){
+            $indicator=Get-CorpusChannelIndicator $c $job $state.Queue $state.Preferences.StaleDays
+            "$($indicator.Label) — $(if($job.Status -eq 'Downloading'){$children=@($state.Queue.Items | Where-Object {$job.Id -in $_.JobIds});"$(@($children | Where-Object Status -eq Pending).Count) pending; $(@($children | Where-Object Status -eq Running).Count) active"}else{$job.Detail})"
+        }else{'Queue a sync to discover videos and download their transcripts.'}
+
         $ui.ChannelDetails.ItemsSource=@(if($c){foreach($field in @('Subject','ChannelName','ChannelId','Url','VideosDiscovered','WithTranscripts','WithoutTranscripts','LastSuccessfulSync','LastAttempt','Status')){[pscustomobject]@{Field=($field -creplace '([a-z])([A-Z])','$1 $2');Value=$c.$field}}})
     }
     function Update-SubjectLock {
@@ -89,6 +93,7 @@ function Show-CorpusWindow {
         $ui.SubjectLockNotice.Text=if($locked){'🔒 This subject has queued work. Renaming and removal are locked until those items finish or are removed.'}elseif($state.QueueWorker){'Pause the queue and let the current item finish before removing subjects.'}else{''}
     }
     function Update-QueueButtons {
+        if($state.RestoringQueue){return}
         $available=(-not $state.Worker -and -not $state.Closing -and $state.Ready -and -not $state.RestartRequired)
         $selected=$ui.QueueGrid.SelectedItem
         $pendingSelected=@($ui.QueueGrid.SelectedItems | Where-Object Status -eq Pending).Count
@@ -96,31 +101,45 @@ function Show-CorpusWindow {
         $ui.QueueRemove.IsEnabled=($available -and $pendingSelected -gt 0)
         $ui.QueueRetry.IsEnabled=($available -and $ui.QueueGrid.SelectedItems.Count -eq 1 -and $selected -and $selected.Status -in @('Failed','Cancelled'))
         $ui.QueueClear.IsEnabled=($available -and @($state.Queue.Items | Where-Object {$_.Status -notin @('Pending','Running')}).Count -gt 0)
-        $ui.QueueStart.IsEnabled=($available -and -not $state.QueueWorker -and (@($state.Queue.Items | Where-Object Status -eq Pending).Count + @($state.Queue.SyncJobs | Where-Object Status -eq Pending).Count) -gt 0)
-        $ui.QueuePause.IsEnabled=($available -and [bool]$state.QueueWorker -and -not $state.Queue.Paused)
-        $ui.QueueCancel.IsEnabled=([bool]$state.QueueWorker -and -not $state.QueueShared.Cancel)
+        $processing=[bool]$state.QueueWorker -or @($state.Queue.Items | Where-Object Status -eq Running).Count -gt 0 -or @($state.Queue.SyncJobs | Where-Object Status -eq Discovering).Count -gt 0
+        $pausing=$processing -and $state.Queue.Paused
+        $running=$processing -or -not $state.Queue.Paused
+        $label=if($pausing){'Pausing…'}elseif($running){'Pause'}else{'Start'}
+        if([Windows.Automation.AutomationProperties]::GetName($ui.QueueToggle) -ne $label){Set-CorpusButtonIcon $ui.QueueToggle $(if($running){'Pause'}else{'Play'}) -Label $label}
+        $ui.QueueToggle.ToolTip=if($running){'Pause the entire queue after the active discovery or download finishes safely.'}else{'Start the entire queue. List every queued channel before downloading videos.'}
+        $hasWork=(@($state.Queue.Items | Where-Object Status -eq Pending).Count + @($state.Queue.SyncJobs | Where-Object Status -eq Pending).Count) -gt 0
+        $ui.QueueToggle.IsEnabled=($available -and -not $pausing -and ($running -or $hasWork))
+
     }
     function Refresh-QueueView {
         $selected=@{};foreach($item in $ui.QueueGrid.SelectedItems){$selected[$item.Id]=$true}
         $queueFile=Get-Item (Join-Path $Root 'data/queue.json') -ErrorAction SilentlyContinue
         $state.QueueStamp=if($queueFile){$queueFile.LastWriteTimeUtc.Ticks.ToString()}else{''}
         $state.Queue=Get-CorpusQueue $Root
-        $ui.QueueGrid.ItemsSource=@($state.Queue.Items)
-        foreach($item in $state.Queue.Items){if($selected.ContainsKey($item.Id)){$null=$ui.QueueGrid.SelectedItems.Add($item)}}
-        $pending=@($state.Queue.Items | Where-Object Status -eq Pending).Count
-        $active=@($state.Queue.Items | Where-Object Status -eq Running).Count
-        $ui.QueueStatus.Text="$(if($state.Queue.Paused){'Paused'}else{'Running'}) | $pending pending | $active active | $(@($state.Queue.SyncJobs | Where-Object Status -in @('Pending','Discovering','Downloading','Cancelling')).Count) channel syncs"
+        $state.RestoringQueue=$true
+        try {
+        $ui.QueueGrid.ItemsSource=@(foreach($item in $state.Queue.Items){
+            $row=$item | Select-Object *;$indicator=Get-CorpusQueueItemIndicator $item.Status
+            $row | Add-Member NoteProperty StatusGlyph $indicator.Glyph
+            $row | Add-Member NoteProperty StatusColor $indicator.Color
+            $row | Add-Member NoteProperty StatusLabel $indicator.Label
+            $row
+        })
+        foreach($item in $ui.QueueGrid.Items){if($selected.ContainsKey($item.Id)){$null=$ui.QueueGrid.SelectedItems.Add($item)}}
+        }finally{$state.RestoringQueue=$false}
+        $summary=Get-CorpusQueueProgress $state.Queue
+        $ui.QueueStatus.Text=$summary.Text;$ui.QueueProgress.Maximum=$summary.Maximum;$ui.QueueProgress.Value=$summary.Value
+        $ui.QueueActivity.Text=if($summary.WaitingChannels){'Video totals are still growing during discovery. No video download starts until all queued channels are resolved.'}elseif(-not $state.Queue.Items.Count){'Add video URLs in Subjects or queue a channel to get started.'}elseif($summary.Phase -eq 'Queue complete'){'All visible videos have finished. Clear finished removes history, not captured files.'}elseif($state.Queue.Paused){'Ready when you are. Start continues pending work; captured files are preserved.'}else{'All queued channels are listed. Processing videos sequentially.'}
+
         Update-StatusIndicators;Update-SubjectLock;Update-QueueButtons;Show-ChannelDetails
     }
     function Set-Busy([bool]$Busy) {
         foreach($name in $mutators){$ui[$name].IsEnabled=(-not $Busy -and $state.Ready -and -not $state.RestartRequired)}
         foreach($name in @('CheckDependencies','UpdateDependencies','RecoverDependencies','DependencyChannel','DependenciesGrid')){$ui[$name].IsEnabled=(-not $Busy)}
         $ui.RestartApplication.IsEnabled=(-not $Busy);$ui.RestartApplication.Visibility=if($state.RestartRequired){'Visible'}else{'Collapsed'}
-        if($state.QueueWorker){foreach($name in @('Build','CheckDependencies','UpdateDependencies','RecoverDependencies','DependencyChannel','DependenciesGrid','RestartApplication','QueueStart')){$ui[$name].IsEnabled=$false}}
+        if($state.QueueWorker){foreach($name in @('Build','CheckDependencies','UpdateDependencies','RecoverDependencies','DependencyChannel','DependenciesGrid','RestartApplication')){$ui[$name].IsEnabled=$false}}
         foreach($name in @('SaveStorage','BrowseStorage','StorageRoot','StorageMove','StorageSwitch','StaleDays','CancelStorage')){$ui[$name].IsEnabled=(-not $Busy -and -not $state.QueueWorker -and -not $state.RestartRequired)}
         $ui.StorageRestart.IsEnabled=(-not $Busy -and -not $state.QueueWorker)
-        $ui.QueuePause.IsEnabled=(-not $Busy -and [bool]$state.QueueWorker)
-        $ui.QueueCancel.IsEnabled=([bool]$state.QueueWorker -and -not $state.QueueShared.Cancel)
         $ui.Cancel.IsEnabled=$Busy -and $state.Operation -notin @('Bootstrap','RecoverDependencies','Storage')
         Update-SubjectLock;Update-QueueButtons;Show-ChannelDetails
     }
@@ -183,7 +202,7 @@ function Show-CorpusWindow {
     function Show-SubjectChannels {
         $previousUrl=if($ui.SubjectChannels.SelectedItem){$ui.SubjectChannels.SelectedItem.Url}else{''}
         $selected=$ui.SubjectPick.SelectedItem
-        if($selected){$ui.SubjectName.Text=$selected.name;$ui.SubjectHeading.Text=$selected.name;$ui.SubjectChannels.ItemsSource=@($ui.ChannelsGrid.Items | Where-Object SubjectId -eq $selected.id | Select-Object Url,StatusLabel,LastSuccessfulSync)}else{$ui.SubjectName.Clear();$ui.SubjectHeading.Text='Select or add a subject';$ui.SubjectChannels.ItemsSource=@()}
+        if($selected){$ui.SubjectName.Text=$selected.name;$ui.SubjectHeading.Text=$selected.name;$ui.SubjectChannels.ItemsSource=@($ui.ChannelsGrid.Items | Where-Object SubjectId -eq $selected.id | Select-Object Url,StatusLabel,@{Name='LastSuccessfulSync';Expression={if($_.LastSuccessfulSync){([datetime]$_.LastSuccessfulSync).ToUniversalTime().ToString('yyyy-MM-dd HH:mm')}else{'Never'}}})}else{$ui.SubjectName.Clear();$ui.SubjectHeading.Text='Select or add a subject';$ui.SubjectChannels.ItemsSource=@()}
         foreach($row in $ui.SubjectChannels.Items){if($row.Url -eq $previousUrl){$ui.SubjectChannels.SelectedItem=$row;break}}
         Update-SubjectLock
     }
@@ -297,12 +316,12 @@ function Show-CorpusWindow {
             if($testAdapter){& (Get-Module Corpus.Queue) ([scriptblock]::Create($testAdapter))}
             Invoke-CorpusQueue $root $shared
         }).AddArgument($Root).AddArgument($state.QueueShared).AddArgument($appRoot).AddArgument($(if($SmokeTest){$SmokeQueueAdapter}else{''}))
-        $state.QueueWorker=$ps;$state.QueueHandle=$ps.BeginInvoke();Set-Busy $false
+        $state.QueueWorker=$ps;$state.QueueHandle=$ps.BeginInvoke();$state.Queue.Paused=$false;Set-Busy $false
     }
     $ui.QueueGrid.Add_SelectionChanged({Update-QueueButtons})
-    $ui.QueueStart.Add_Click({Start-QueueWork})
-    $ui.QueuePause.Add_Click({Start-Work 'QueueAction' @{Action='Pause';Id=''}})
-    $ui.QueueCancel.Add_Click({if($state.QueueShared){$state.QueueShared.Cancel=$true;$ui.QueueCancel.IsEnabled=$false}})
+    $ui.QueueToggle.Add_Click({
+        if($state.QueueWorker -or -not $state.Queue.Paused){Start-Work 'QueueAction' @{Action='Pause';Id=''}}else{Start-QueueWork}
+    })
     $ui.QueueRemove.Add_Click({$ids=@($ui.QueueGrid.SelectedItems | ForEach-Object {$_.Id});if($ids.Count){Start-Work 'QueueRemove' @{Ids=$ids}}})
     $ui.QueueRetry.Add_Click({if($ui.QueueGrid.SelectedItem){Start-Work 'QueueAction' @{Action='Retry';Id=$ui.QueueGrid.SelectedItem.Id}}})
     $ui.QueueClear.Add_Click({Start-Work 'QueueAction' @{Action='ClearFinished';Id=''}})
@@ -351,7 +370,7 @@ function Show-CorpusWindow {
             while($queueCount -lt 50 -and $state.QueueShared.Messages.TryDequeue([ref]$queueMessage)){$ui.LogText.AppendText($queueMessage+"`r`n");$queueCount++}
             if($ui.LogText.Text.Length -gt 80000){$ui.LogText.Text=$ui.LogText.Text.Substring($ui.LogText.Text.Length-50000)}
             $qp=$state.QueueShared.Progress
-            if($qp){$ui.QueueStatus.Text="$(if($state.Queue.Paused){'Pausing after current'}else{'Running'}) | $($qp.Stage) | $($qp.Item)"}
+            if($qp){$ui.QueueActivity.Text="$(if($state.Queue.Paused){'Pausing safely · '})$($qp.Stage) · $($qp.Item)"}
             if($state.QueueHandle.IsCompleted){
                 try{$null=$state.QueueWorker.EndInvoke($state.QueueHandle);if($state.QueueWorker.HadErrors){throw $state.QueueWorker.Streams.Error[0].Exception.Message}}
                 catch{$ui.LogText.AppendText("Queue: $($_.Exception.Message)`r`n");$ui.Status.Text=$_.Exception.Message}
