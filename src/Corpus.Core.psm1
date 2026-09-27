@@ -38,8 +38,9 @@ function Get-CorpusConfig {
     param([string]$Root)
     $config=Read-CorpusJson (Join-Path $Root 'config.json')
     if (-not $config -or -not $config.PSObject.Properties['subjects']) { throw 'config.json must contain a subjects array.' }
+    if(-not $config.PSObject.Properties['archivedSubjects']){$config | Add-Member NoteProperty archivedSubjects @()}
     $ids=@{}
-    foreach($s in $config.subjects) {
+    foreach($s in (@($config.subjects)+@($config.archivedSubjects))) {
         if (-not $s.id -or -not $s.name -or $ids.ContainsKey($s.id)) { throw 'Subjects require unique nonempty IDs and display names.' }
         $ids[$s.id]=$true
         foreach($c in $s.channels) { $null=Assert-CorpusYouTubeUrl $c.url }
@@ -81,6 +82,27 @@ function Set-CorpusSubject {
     return $Id
     } finally {$configLock.Dispose()}
 }
+function Remove-CorpusSubject {
+    param([string]$Root,[string]$Id)
+    try{$writer=[IO.File]::Open((Join-Path $Root 'data/corpus.lock'),[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)}catch [IO.IOException]{throw 'Pause capture work and wait for the active item to finish before removing a subject.'}
+    $lock=$null
+    try {
+        $lock=Enter-CorpusConfigLock $Root
+        if(Test-CorpusSubjectQueued $Root $Id){throw 'This subject has pending or active queue items. Finish or remove them before removing the subject.'}
+        $config=Get-CorpusConfig $Root
+        $subject=@($config.subjects | Where-Object id -eq $Id)
+        if(-not $subject.Count){throw 'Subject no longer exists.'}
+        $subject[0] | Add-Member NoteProperty archivedAt ([datetime]::UtcNow.ToString('o')) -Force
+        $config.archivedSubjects=@($config.archivedSubjects)+$subject[0]
+        $config.subjects=@($config.subjects | Where-Object id -ne $Id)
+        Write-CorpusJson (Join-Path $Root 'config.json') $config
+    } finally {if($lock){$lock.Dispose()};$writer.Dispose()}
+}
+function Get-CorpusArchivedVideoSubject {
+    param([string]$Root,$Video)
+    if(-not $Video -or -not $Video.SubjectId -or -not (Test-Path (Join-Path $Root config.json))){return $null}
+    return ((Get-CorpusConfig $Root).archivedSubjects | Where-Object id -eq $Video.SubjectId | Select-Object -First 1)
+}
 function Set-CorpusChannelAssociation {
     param([string]$Root,[string]$SubjectId,[string]$Url,[switch]$Remove)
     $url=Assert-CorpusYouTubeUrl $Url
@@ -108,7 +130,7 @@ function Get-CorpusVideos {
     $config=Get-CorpusConfig $Root
     foreach($f in Get-ChildItem (Join-Path $Root 'data/normalized/videos') -Filter '*.json' -ErrorAction SilentlyContinue) {
         $v=Read-CorpusJson $f.FullName
-        $s=@($config.subjects | Where-Object id -eq $v.SubjectId)
+        $s=@((@($config.subjects)+@($config.archivedSubjects)) | Where-Object id -eq $v.SubjectId)
         if($s.Count) { $v.SubjectName=$s[0].name }
         $v
     }

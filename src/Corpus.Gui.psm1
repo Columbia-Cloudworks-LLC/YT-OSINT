@@ -13,8 +13,21 @@ function Start-CorpusRestart {
     if($process.WaitForExit(300)){$process.Dispose();throw 'Could not restart YT-OSINT. Close and reopen the application.'}
     return [pscustomobject]@{Process=$process;SignalPath=$signal}
 }
+function Show-CorpusSubjectPrompt {
+    param($Owner,[string]$SmokeName='',[switch]$SmokeCancel)
+    [xml]$layout=@'
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="Add subject" Width="420" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="14">
+<StackPanel Margin="20"><TextBlock Text="Subject name"/><TextBox x:Name="NameInput" Margin="0,10" Padding="8"/><TextBlock x:Name="ErrorText" Foreground="#A02020" TextWrapping="Wrap"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Right"><Button x:Name="SaveName" Content="Add subject" IsDefault="True" Padding="14,7" Margin="4"/><Button Content="Cancel" IsCancel="True" Padding="14,7" Margin="4"/></StackPanel></StackPanel></Window>
+'@
+    $dialog=[Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($layout));if($Owner){$dialog.Owner=$Owner}
+    $nameBox=$dialog.FindName('NameInput');$save=$dialog.FindName('SaveName');$errorText=$dialog.FindName('ErrorText')
+    $save.Add_Click({if([string]::IsNullOrWhiteSpace($nameBox.Text)){$errorText.Text='Enter a subject name.';return};$dialog.DialogResult=$true})
+    $dialog.Add_ContentRendered({$null=$nameBox.Focus();if($SmokeCancel){$dialog.DialogResult=$false}elseif($SmokeName){$nameBox.Text=$SmokeName;$save.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))}})
+    if($dialog.ShowDialog() -eq $true){return $nameBox.Text.Trim()}
+    return $null
+}
 function Show-CorpusWindow {
-    param([string]$Root,[switch]$SkipDependencies,[switch]$SmokeTest,[string]$ScreenshotPath='',[switch]$SmokeCheckDependencies,[switch]$OpenDependencies,[switch]$SmokeCorpus,[scriptblock]$SmokeGridCheck,[scriptblock]$SmokeQueueCheck,[string]$SmokeQueueAdapter='')
+    param([string]$Root,[switch]$SkipDependencies,[switch]$SmokeTest,[string]$ScreenshotPath='',[switch]$SmokeCheckDependencies,[switch]$OpenDependencies,[switch]$SmokeCorpus,[scriptblock]$SmokeGridCheck,[scriptblock]$SmokeQueueCheck,[string]$SmokeQueueAdapter='',[scriptblock]$SmokeSubjectPrompt,[switch]$SmokeConfirmRemoval)
     $appRoot=Split-Path $PSScriptRoot -Parent
     Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase
     [xml]$xaml=Get-Content (Join-Path $PSScriptRoot 'Corpus.Gui.xaml') -Raw -Encoding UTF8
@@ -27,16 +40,18 @@ function Show-CorpusWindow {
         $ui[$name]=$window.FindName($name)
     }
     foreach($entry in @{OpenTranscript='Transcript';OpenResult='YouTube';OpenWorkbook='Excel';Build='Export'}.GetEnumerator()){Set-CorpusButtonIcon $ui[$entry.Key] $entry.Value}
-    $state=@{Worker=$null;Handle=$null;Shared=$null;Operation='';Snapshot=$null;Ready=[bool]$SkipDependencies;Closing=$false;PendingSubject='';SmokeTicks=0;LastOutcome='Ready';CheckedStartup=(([bool]$SkipDependencies -or [bool]$SmokeTest) -and -not $SmokeCheckDependencies);RestartRequired=$false;RestartTicket=$null;DependencyRows=@();SmokeStage=0;ViewerVerified=$false;SmokeError='';QueueWorker=$null;QueueHandle=$null;QueueShared=$null;Queue=(Initialize-CorpusQueue $Root);QueueStamp='';QueueTicks=0;NeedsRefresh=$false}
-    $mutators=@('CreateSubject','RenameSubject','AddChannel','RemoveChannel','SyncSelected','SyncAll','Refresh','CreateVideoSubject','ImportVideo','Build','Search','FilterCorpus','RefreshChannelTranscripts','RefreshVideoTranscript','OpenTranscript','AutoExport','QueueStart','QueuePause','QueueRemove','QueueRetry','QueueClear')
+    $state=@{Worker=$null;Handle=$null;Shared=$null;Operation='';Snapshot=$null;Ready=[bool]$SkipDependencies;Closing=$false;PendingSubject='';SmokeTicks=0;LastOutcome='Ready';CheckedStartup=(([bool]$SkipDependencies -or [bool]$SmokeTest) -and -not $SmokeCheckDependencies);RestartRequired=$false;RestartTicket=$null;DependencyRows=@();SmokeStage=0;ViewerVerified=$false;SmokeError='';QueueWorker=$null;QueueHandle=$null;QueueShared=$null;Queue=(Initialize-CorpusQueue $Root);QueueStamp='';SelectCreatedSubject=$false;QueueTicks=0;NeedsRefresh=$false}
+    $mutators=@('CreateSubject','RemoveSubject','RenameSubject','AddChannel','RemoveChannel','SyncSelected','SyncAll','Refresh','CreateVideoSubject','ImportVideo','Build','Search','FilterCorpus','RefreshChannelTranscripts','RefreshVideoTranscript','OpenTranscript','AutoExport','QueueStart','QueuePause','QueueRemove','QueueRetry','QueueClear')
     $ui.Paths.Text="Application and corpus root: $Root`nWorkbook: $(Join-Path $Root 'output/YouTubeCorpus.xlsx')`nSource configuration: $(Join-Path $Root 'config.json')`nNative dependencies: $(Get-CorpusNativeRoot)"
     $dependencySettings=Get-CorpusDependencySettings $Root
     $ui.DependencyChannel.SelectedIndex=if($dependencySettings.YtDlpChannel -eq 'nightly'){1}else{0}
     function Update-SubjectLock {
         $selected=$ui.SubjectPick.SelectedItem
         $locked=$selected -and @($state.Queue.Items | Where-Object {$_.SubjectId -eq $selected.id -and $_.Status -in @('Pending','Running')}).Count -gt 0
-        $ui.RenameSubject.IsEnabled=(-not $state.Worker -and $state.Ready -and -not $state.RestartRequired -and -not $locked)
-        $ui.SubjectLockNotice.Text=if($locked){'This subject has queued work. Its name is locked until those items finish or are removed.'}else{''}
+        $canEdit=(-not $state.Worker -and $state.Ready -and -not $state.RestartRequired -and [bool]$selected)
+        $ui.RenameSubject.IsEnabled=($canEdit -and -not $locked);$ui.RemoveSubject.IsEnabled=($canEdit -and -not $locked -and -not $state.QueueWorker)
+        $ui.AddChannel.IsEnabled=$canEdit;$ui.RemoveChannel.IsEnabled=$canEdit;$ui.SubjectName.IsEnabled=$canEdit;$ui.ChannelUrl.IsEnabled=$canEdit
+        $ui.SubjectLockNotice.Text=if($locked){'This subject has queued work. Renaming and removal are locked until those items finish or are removed.'}elseif($state.QueueWorker){'Pause the queue and let the current item finish before removing subjects.'}else{''}
     }
     function Update-QueueButtons {
         $available=(-not $state.Worker -and -not $state.Closing -and $state.Ready -and -not $state.RestartRequired)
@@ -80,6 +95,7 @@ function Show-CorpusWindow {
         if($state.Worker){return}
         if($Operation -in @('SyncAll','SyncChannel','Video')){$Arguments.SkipWorkbook=(-not [bool]$ui.AutoExport.IsChecked)}
         if($Operation -eq 'Search'){$state.SearchText=$Arguments.Text}
+        if($Operation -eq 'Subject'){$state.SelectCreatedSubject=(-not $Arguments.Id)}
         if($Operation -eq 'QueueAdd'){$state.QueuedInput=$Arguments.Text}
         $state.Operation=$Operation;$state.Shared=[hashtable]::Synchronized(@{Cancel=$false;CommitInProgress=$false;DependenciesChanged=$false;Progress=$null;Messages=[Collections.Concurrent.ConcurrentQueue[string]]::new()})
         $ps=[powershell]::Create()
@@ -121,19 +137,21 @@ function Show-CorpusWindow {
     }
     function Show-SubjectChannels {
         $selected=$ui.SubjectPick.SelectedItem
-        if($selected){$ui.SubjectName.Text=$selected.name;$ui.SubjectChannels.ItemsSource=@($selected.channels)}else{$ui.SubjectChannels.ItemsSource=@()}
+        if($selected){$ui.SubjectName.Text=$selected.name;$ui.SubjectHeading.Text=$selected.name;$ui.SubjectChannels.ItemsSource=@($selected.channels)}else{$ui.SubjectName.Clear();$ui.SubjectHeading.Text='Select or add a subject';$ui.SubjectChannels.ItemsSource=@()}
         Update-SubjectLock
     }
     function Set-Snapshot($Snapshot) {
         $subjectDraft=$ui.SubjectName.Text
         $oldSubjectName=if($ui.SubjectPick.SelectedItem){$ui.SubjectPick.SelectedItem.name}else{''}
         $state.Snapshot=$Snapshot
-        $subjectId=if($ui.SubjectPick.SelectedItem){$ui.SubjectPick.SelectedItem.id}else{''}
+        $subjectId=if($state.ContainsKey('PendingSubjectId') -and $state.PendingSubjectId){$state.PendingSubjectId}elseif($ui.SubjectPick.SelectedItem){$ui.SubjectPick.SelectedItem.id}else{''}
         $videoId=if($ui.VideoSubject.SelectedItem){$ui.VideoSubject.SelectedItem.id}else{''}
         $searchId=if($ui.SearchSubject.SelectedItem){$ui.SearchSubject.SelectedItem.id}else{''}
-        foreach($name in @('SubjectPick','VideoSubject','SearchSubject')){$ui[$name].ItemsSource=@($Snapshot.Config.subjects)}
-        foreach($s in $Snapshot.Config.subjects){if($s.id -eq $subjectId){$ui.SubjectPick.SelectedItem=$s};if($s.id -eq $videoId -or $s.name -eq $state.PendingSubject){$ui.VideoSubject.SelectedItem=$s};if($s.id -eq $searchId){$ui.SearchSubject.SelectedItem=$s}}
-        $state.PendingSubject=''
+        foreach($name in @('SubjectPick','VideoSubject')){$ui[$name].ItemsSource=@($Snapshot.Config.subjects)}
+        $ui.SearchSubject.ItemsSource=@(foreach($s in $Snapshot.Config.subjects){[pscustomobject]@{id=$s.id;DisplayName=$s.name}};foreach($s in $Snapshot.Config.archivedSubjects){[pscustomobject]@{id=$s.id;DisplayName=($s.name+' (archived)')}})
+        foreach($s in $Snapshot.Config.subjects){if($s.id -eq $subjectId){$ui.SubjectPick.SelectedItem=$s};if($s.id -eq $videoId -or $s.name -eq $state.PendingSubject){$ui.VideoSubject.SelectedItem=$s};if($s.id -eq $searchId){$ui.SearchSubject.SelectedItem=@($ui.SearchSubject.Items | Where-Object id -eq $searchId)[0]}}
+        foreach($s in $Snapshot.Config.archivedSubjects){if($s.id -eq $searchId){$ui.SearchSubject.SelectedItem=@($ui.SearchSubject.Items | Where-Object id -eq $searchId)[0]}}
+        $state.PendingSubject='';$state.PendingSubjectId=''
         if(-not $ui.SubjectPick.SelectedItem -and $Snapshot.Config.subjects.Count){$ui.SubjectPick.SelectedIndex=0}
         $channelRows=@(foreach($s in $Snapshot.Config.subjects){foreach($c in $s.channels){
             $known=@($Snapshot.Channels | Where-Object {$c.url -in $_.Urls});$attempt=@($Snapshot.Attempts | Where-Object Url -eq $c.url)
@@ -143,7 +161,8 @@ function Show-CorpusWindow {
         $ui.ChannelsGrid.ItemsSource=$channelRows
         $ui.CorpusGrid.ItemsSource=@($Snapshot.Videos | Select-Object SubjectName,ChannelName,VideoTitle,VideoId,PublishedDate,Duration,TranscriptAvailable,SubtitleSource,LastSyncStatus,VideoUrl)
         Show-SubjectChannels
-        if($subjectDraft -ne $oldSubjectName){$ui.SubjectName.Text=$subjectDraft}
+        if($ui.SubjectPick.SelectedItem -and $ui.SubjectPick.SelectedItem.id -eq $subjectId -and -not $state.SelectCreatedSubject -and $subjectDraft -ne $oldSubjectName){$ui.SubjectName.Text=$subjectDraft}
+        $state.SelectCreatedSubject=$false
     }
     function Show-UiError($Message){$ui.Status.Text=$Message;$ui.LogText.AppendText("ERROR: $Message`r`n");[Windows.MessageBox]::Show($window,$Message,'YT-OSINT','OK','Warning') | Out-Null}
     function Get-SelectedSubject {if(-not $ui.SubjectPick.SelectedItem){throw 'Select a subject first.'};return $ui.SubjectPick.SelectedItem}
@@ -169,7 +188,14 @@ function Show-CorpusWindow {
     $ui.RestartApplication.Add_Click({Restart-Application})
     $ui.RecoverDependencies.Add_Click({Start-Work 'RecoverDependencies'})
     $ui.SubjectPick.Add_SelectionChanged({Show-SubjectChannels})
-    $ui.CreateSubject.Add_Click({Start-Work 'Subject' @{Name=$ui.SubjectName.Text;Id=''}})
+    $ui.CreateSubject.Add_Click({
+        $name=if($SmokeTest -and $SmokeSubjectPrompt){& $SmokeSubjectPrompt $window}else{Show-CorpusSubjectPrompt $window}
+        if($name){Start-Work 'Subject' @{Name=$name;Id=''}}
+    })
+    $ui.RemoveSubject.Add_Click({try{
+        $s=Get-SelectedSubject
+        if(($SmokeTest -and $SmokeConfirmRemoval) -or [Windows.MessageBox]::Show($window,"Remove '$($s.name)' from subjects?`n`nCaptured videos and transcripts will be preserved.",'Remove subject','YesNo','Question') -eq 'Yes'){Start-Work 'RemoveSubject' @{Id=$s.id}}
+    }catch{Show-UiError $_.Exception.Message}})
     $ui.RenameSubject.Add_Click({try{$s=Get-SelectedSubject;Start-Work 'Subject' @{Name=$ui.SubjectName.Text;Id=$s.id}}catch{Show-UiError $_.Exception.Message}})
     $ui.AddChannel.Add_Click({try{$s=Get-SelectedSubject;Start-Work 'Associate' @{SubjectId=$s.id;Url=$ui.ChannelUrl.Text.Trim();Remove=$false}}catch{Show-UiError $_.Exception.Message}})
     $ui.RemoveChannel.Add_Click({try{$s=Get-SelectedSubject;if(-not $ui.SubjectChannels.SelectedItem){throw 'Select a channel association to remove.'};Start-Work 'Associate' @{SubjectId=$s.id;Url=$ui.SubjectChannels.SelectedItem.url;Remove=$true}}catch{Show-UiError $_.Exception.Message}})
@@ -299,6 +325,7 @@ function Show-CorpusWindow {
                     'Refresh' {if($result.Count){Set-Snapshot $result[-1]}}
                     'Search' {$ui.SearchGrid.ItemsSource=$result;$ui.CorpusGrid.Visibility='Collapsed';$ui.SearchGrid.Visibility='Visible';$ui.CorpusNotice.Text="$($result.Count) matching segments. Double-click a result to read its transcript.";$ui.Status.Text="$($result.Count) matches"}
                     'Transcript' {if($result.Count){$viewerData=$result[-1]}}
+                    'Subject' {if($state.SelectCreatedSubject -and $result.Count){$state.PendingSubjectId=[string]$result[-1]}}
                     'QueueAdd' {if($result.Count){$ui.QueueAddNotice.Text="$($result[-1].Added) added; $($result[-1].Duplicates) duplicates skipped";if($ui.VideoUrl.Text -eq $state.QueuedInput){$ui.VideoUrl.Clear()}};Refresh-QueueView}
                     'QueueAction' {Refresh-QueueView}
                     'Filter' {$ui.CorpusGrid.ItemsSource=$result;$ui.CorpusGrid.Visibility='Visible';$ui.SearchGrid.Visibility='Collapsed';$ui.CorpusNotice.Text="$($result.Count) videos. Double-click a row to read its transcript."}
@@ -329,4 +356,4 @@ function Show-CorpusWindow {
         }
     }finally{$timer.Stop();if($state.QueueWorker){$state.QueueShared.Shutdown=$true;$state.QueueShared.Cancel=$true;$state.QueueWorker.Dispose()};if($state.Worker){$state.Shared.Cancel=$true;$state.Worker.Dispose()};if($state.RestartTicket){[IO.File]::WriteAllText($state.RestartTicket.SignalPath,'ready');$state.RestartTicket.Process.Dispose()}}
 }
-Export-ModuleMember -Function Show-CorpusWindow,Start-CorpusRestart
+Export-ModuleMember -Function Show-CorpusWindow,Start-CorpusRestart,Show-CorpusSubjectPrompt

@@ -8,9 +8,10 @@ Use Windows PowerShell 5.1 with ImportExcel and Pester 3.4 or 4.10.1:
 .\tests\Run-Tests.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-ViewerIntegration.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-QueueIntegration.ps1
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-SubjectsIntegration.ps1
 ```
 
-GitHub Actions runs syntax parsing, the fixture suite, and both WPF scripts on Windows. Tests use `tests/fixtures/config.json`, not the user's live subject configuration. No YouTube requests are made by these checks.
+GitHub Actions runs syntax parsing, the fixture suite, and all three WPF scripts on Windows. Tests use `tests/fixtures/config.json`, not the user's live subject configuration. No YouTube requests are made by these checks.
 
 The fixture suite covers configuration and identity, atomic writes, concurrent subject updates, VTT normalization, subtitle selection, cached transcript reuse, searches, timestamp links, acquisition failures, members-only skips, Excel structure, run accounting, persistent rate-limit scheduling, dependency verification, rollback/recovery, and maintenance locks.
 
@@ -23,6 +24,8 @@ The viewer integration test exercises literal punctuation and Unicode matching, 
 The queue integration test replaces acquisition with a local adapter that deliberately holds a download open. While the queue worker is active, it drives the actual GUI to create and rename an unrelated subject, verify queued-subject name protection, append a URL, remove a pending item, and complete a corpus search. It then pauses after the current item, resumes, and closes during another active item to verify paused recovery. Queue files, synchronization, UI controls, and background workers are the real implementation.
 
 This validates concurrency and interaction with controlled acquisition. It does not establish current YouTube availability or guarantee avoidance of rate limits.
+
+The subject integration test exercises the actual name prompt and cancellation, automatic selection of a new subject, the right-hand channel pane, safe removal, archived search choices, and same-name recreation with a different ID and no inherited channels. Fixture tests also compare captured JSON bytes before/after archival, verify queued removal guards, and check that overlapping imports retain archived video ownership.
 
 ## Workbook and captured-data verification
 

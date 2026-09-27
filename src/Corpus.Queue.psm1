@@ -48,8 +48,9 @@ function Add-CorpusQueueUrls {
         foreach($entry in $entries){
             if($seen.ContainsKey($entry.Id)){$duplicates++;continue}
             $video=Read-CorpusJson (Join-Path $Root "data/normalized/videos/$($entry.Id).json")
-            $effectiveId=if($SubjectId){$SubjectId}elseif($video){$video.SubjectId}else{''}
-            $subject=@($config.subjects | Where-Object id -eq $effectiveId)
+            $archived=Get-CorpusArchivedVideoSubject $Root $video
+            $effectiveId=if($archived){$archived.id}elseif($SubjectId){$SubjectId}elseif($video){$video.SubjectId}else{''}
+            $subject=@((@($config.subjects)+@($config.archivedSubjects)) | Where-Object id -eq $effectiveId)
             if($effectiveId -and -not $subject.Count){throw 'A saved video references a missing subject. Select a subject explicitly.'}
             $queue.Items=@($queue.Items)+[pscustomobject][ordered]@{
                 Id=[guid]::NewGuid().ToString('N');VideoId=$entry.Id;Url=$entry.Url

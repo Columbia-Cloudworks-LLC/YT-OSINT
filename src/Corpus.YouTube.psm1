@@ -93,6 +93,8 @@ function Save-CorpusMembersOnlyVideo {
         $video=ConvertTo-CorpusVideo $ListingEntry $SubjectId $SubjectName
         $video.MetadataCapturedAt=$null
     }
+    $archived=Get-CorpusArchivedVideoSubject $Context.Root $video
+    if($archived){$SubjectId=$archived.id;$SubjectName=$archived.name}
     if($SubjectId){$video.SubjectId=$SubjectId;$video.SubjectName=$SubjectName}
     if($ListingEntry){
         if($video.VideoTitle -eq $VideoId -and (Get-CorpusProperty $ListingEntry title '')){$video.VideoTitle=$ListingEntry.title}
@@ -113,6 +115,8 @@ function Import-CorpusVideo {
     Test-CorpusCancellation $Context
     $cachedId=Get-CorpusVideoIdFromUrl $Url
     $cached=if($cachedId){Read-CorpusJson (Join-Path $Context.Root "data/normalized/videos/$cachedId.json")}else{$null}
+    $archived=Get-CorpusArchivedVideoSubject $Context.Root $cached
+    if($archived){$SubjectId=$archived.id;$SubjectName=$archived.name}
     if(-not $RefreshTranscript -and $cached -and $cached.LastSyncStatus -eq 'SkippedMembersOnly' -and (Get-CorpusProperty $ListingEntry availability '') -notin @('public','unlisted')){return Save-CorpusMembersOnlyVideo $Context $cachedId $SubjectId $SubjectName $Run $ListingEntry}
     if(-not $RefreshTranscript -and (Test-CorpusCachedTranscript $Context $cached)){
         if($Run){$Run.VideosAlreadyKnown++}

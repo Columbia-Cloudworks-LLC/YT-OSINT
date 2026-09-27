@@ -75,7 +75,7 @@ Cooldown deadlines and retry counts are saved in `%LOCALAPPDATA%\YT-OSINT\youtub
 
 ## Desktop workflow
 
-1. **Subjects:** select a subject, enter its display name, and rename it, or create another subject. Add channel URLs under the selected subject. Select an association to remove it; previously captured videos, observations, and transcripts remain. A subject with Pending or Running queue items cannot be renamed, even while the queue is paused. New subjects and unrelated subjects remain editable during queued downloads.
+1. **Subjects:** select a subject in the left pane to see its channels on the right. **Add subject** prompts for a name, refreshes the list, and selects the new subject so you can add channels immediately. Rename the selected subject using its name field. **Remove subject** asks for confirmation, then archives the subject; captured files remain unchanged. Pending/Running queue items block both rename and removal. Removal also waits for capture/export work to be idle, preventing assignment races. New subjects and unrelated subjects remain editable during queued downloads.
 2. **Channels:** select a configured source and sync it, or sync all sources. The table shows stable IDs, counts, last attempt, last successful sync, and status. URLs resolving to the same channel ID share canonical channel state. Conflicting subject ownership is rejected while the prior association is active. Channel sync remains a separate operation; finish or pause the video queue before starting one.
 3. **Video Queue:** paste one video URL per line, choose a subject, and press **Add URLs to queue**. Invalid batches are rejected with line numbers; duplicate pending/active video IDs are skipped. Press **Start / resume** to process items sequentially. Use **Pause after current**, **Cancel current and pause**, **Remove pending item**, **Retry selected**, and **Clear finished** to manage work. Titles appear when already known or after an import. Leaving the subject unassigned preserves an existing video’s subject. See the [queue guide](docs/QUEUE.md).
 4. **Corpus:** use **Find videos** to filter metadata or **Find in transcripts** to search captions, with optional subject/channel/video/date filters. Both use the same literal query field. Click a column header to sort ascending; click again for descending. Double-click a video or search result, or select it and press **Read transcript**. There is no separate Search tab. Button icons distinguish the transcript reader, YouTube links, Excel, and workbook export; text labels remain visible. The bundled vector icons work offline and scale with Windows display settings.
@@ -83,6 +83,8 @@ Cooldown deadlines and retry counts are saved in `%LOCALAPPDATA%\YT-OSINT\youtub
 6. **Excel export:** GUI imports save the corpus without rebuilding Excel by default. Use **Export Excel workbook** when needed, or enable **Also export Excel after imports** for the current session. Queued items remember the export and refresh choices made when they were added. CLI imports retain automatic export. Excel is an optional view of the canonical JSON files.
 7. **Logs / Status:** inspect progress, counts, warnings, and errors; open the structured per-run log directory.
 8. **Settings → Dependencies:** check releases, review installed paths and providers, select updates, or recover an interrupted update. **Settings → Storage:** inspect paths and open data/configuration.
+
+Removed subjects leave the managed list, import selector, and future channel syncs. Their IDs, final names, and historical associations stay in `config.json` under `archivedSubjects`; their captures remain searchable through the Corpus subject filter, marked **(archived)**. A new subject with the same name receives a fresh ID and no inherited channels. Reimporting an already captured video preserves its archived subject assignment, even when a new subject is selected; new video IDs can belong to the new subject. Old failed queue history cannot revive a removed subject. Removal does not delete or rewrite videos, transcript snapshots, channel records, or run logs.
 
 Members-only videos are recorded as **SkippedMembersOnly**, counted separately, and excluded from failure totals. Channel listings identify them before video requests; explicit membership errors during metadata retrieval also become skips. Existing transcripts are preserved. Known member skips are reused unless explicitly refreshed or a subsequent channel listing reports public/unlisted access. Other errors, including private videos and rate limits, retain their existing handling.
 
@@ -167,13 +169,14 @@ Install-Module Pester -RequiredVersion 4.10.1 -Scope CurrentUser
 .\tests\Run-Tests.ps1
 ```
 
-The deterministic suite uses local metadata/VTT fixtures; it does not access YouTube or install native dependencies. It covers configuration, relationships, identifiers, parser edge cases, rolling captions, timestamp links, repeated acquisition via a mocked external adapter, raw deduplication/history, failure persistence and continuation, search context, process output, cancellation/run records, and real XLSX content/locking. The queue tests also cover deduplication, atomic validation, subject locks, concurrent configuration writers, pause/cancel/retry/recovery, rate-limit halting, and cached imports under the queue writer lock. GitHub Actions runs the suite and both WPF integration scripts on Windows.
+The deterministic suite uses local metadata/VTT fixtures; it does not access YouTube or install native dependencies. It covers configuration, relationships, identifiers, parser edge cases, rolling captions, timestamp links, repeated acquisition via a mocked external adapter, raw deduplication/history, failure persistence and continuation, search context, process output, cancellation/run records, and real XLSX content/locking. The queue tests also cover deduplication, atomic validation, subject locks, concurrent configuration writers, pause/cancel/retry/recovery, rate-limit halting, and cached imports under the queue writer lock. GitHub Actions runs the suite and all three WPF integration scripts on Windows.
 
 Actual WPF interaction tests (local fixtures; no YouTube requests):
 
 ```powershell
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-ViewerIntegration.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-QueueIntegration.ps1
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-SubjectsIntegration.ps1
 ```
 
 The queue integration test holds a simulated download open while exercising real controls for subject creation/rename, adding/removing URLs, corpus search, pause/resume, and window-close recovery. The simulation replaces only acquisition; queue storage, locks, and GUI workers are real.
@@ -200,7 +203,7 @@ powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\YouTubeCorpus.ps1
 
 ## Troubleshooting and limits
 
-- **Subject name locked:** finish, cancel, or remove every Pending/Running item for that subject. Pausing keeps pending names locked. Other subjects can still be edited.
+- **Subject rename/removal locked:** finish, cancel, or remove every Pending/Running item for that subject. Pausing keeps pending names locked. Other subjects can still be edited.
 - **Queue paused after restart:** select Start / resume. Downloads never resume automatically; completed captures are reused.
 - **Another queue is running:** use the window that owns the queue, or wait for it to finish. Do not delete lock files to bypass an active worker.
 - **Failed queue item:** review its Details and Logs, then use Retry selected. Ordinary failures do not stop subsequent items; persistent rate limiting does.

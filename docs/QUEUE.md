@@ -8,7 +8,7 @@ The app validates the entire batch before saving anything. If a line is invalid,
 
 Adding URLs does not start a paused queue. Press **Start / resume** when ready. Items added during an active queue join its tail and are processed automatically unless you pause. Unknown titles initially display the video ID; adding a batch makes no requests just to look up titles. Full video media is never downloaded.
 
-Each item stores a stable subject ID and the subject name at enqueue time. If no subject is selected, an already captured video's existing assignment is retained. An unassigned new video remains unassigned. Refresh and optional Excel export choices are captured when adding the item, rather than changing underneath an active batch.
+Each item stores a stable subject ID and the subject name at enqueue time. If no subject is selected, an already captured video's existing assignment is retained. An unassigned new video remains unassigned. If a captured video belongs to an archived subject, reimporting it preserves that archived assignment even if a different subject is selected. Newly created subjects do not inherit archived captures. Refresh and optional Excel export choices are captured when adding the item, rather than changing underneath an active batch.
 
 ## Manage work
 
@@ -29,7 +29,7 @@ The order of pending processing follows the stored list; sorting the displayed q
 
 Subject creation, channel association edits, corpus browsing, searches, transcript reading, and adding/removing pending URLs remain available during queued imports. The foreground worker may briefly disable its own actions while saving or refreshing; it is independent of the acquisition worker.
 
-A subject's name is locked whenever any item for it is Pending or Running, including when the queue is paused. The Rename button is disabled and the persistence layer independently enforces the restriction. New subjects and unrelated names remain editable. Cancelled, Failed, Completed, and Skipped items do not lock names; retry refreshes the stored name and locks it again.
+A subject's name and removal are locked whenever any item for it is Pending or Running, including when the queue is paused. The Rename and Remove subject buttons are disabled and the persistence layer independently enforces the restriction. New subjects and unrelated names remain editable. Removal of any subject additionally requires capture/export work to be idle; pause and wait for the current item first. Cancelled, Failed, Completed, and Skipped items do not lock names; retry refreshes the stored name and locks it again. If the subject has since been removed, retry is rejected; add the URL again using a current subject. Existing archived captures retain their original subject identity.
 
 Channel sync is still a separate operation. Channel sync, manual Excel export, and dependency maintenance are disabled while the queue worker is active. Pause and wait for the active item to finish before using those actions. The main status-bar Cancel controls foreground work; queue cancellation has its own button.
 

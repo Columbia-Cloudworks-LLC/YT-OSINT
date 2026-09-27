@@ -36,7 +36,7 @@ $check={
         }
         1 {
             if($state.Queue.Items.Count -ne 2){throw 'Batch did not produce two visible queue items.'}
-            if($ui.RenameSubject.IsEnabled){throw 'Queued subject rename was not disabled.'}
+            if($ui.RenameSubject.IsEnabled -or $ui.RemoveSubject.IsEnabled){throw 'Queued subject rename was not disabled.'}
             Click $ui.QueueStart;$state.QueueTestStage=2
         }
         2 {
@@ -83,7 +83,7 @@ $check={
         }
     }
 }
-Show-CorpusWindow $root -SkipDependencies -SmokeTest -SmokeQueueCheck $check -SmokeQueueAdapter $adapter
+Show-CorpusWindow $root -SkipDependencies -SmokeTest -SmokeQueueCheck $check -SmokeQueueAdapter $adapter -SmokeSubjectPrompt {param($owner) Show-CorpusSubjectPrompt $owner -SmokeName 'Created during download'}
 $q=Initialize-CorpusQueue $root
 if(-not $q.Paused -or $q.Items[1].Status -ne 'Pending'){throw 'Closing did not preserve the interrupted item for resume.'}
 'Queue GUI: batch entry, concurrent subject editing, search, append/remove, pause/resume, and close/recovery passed.'

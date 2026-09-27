@@ -2,6 +2,7 @@
 function Invoke-CorpusOperation {
     param([string]$Root,[string]$Operation,$Arguments=@{},$Shared=$null,$CorpusLock=$null)
     # Configuration has its own short lock, independent of the network/import lock.
+    if($Operation -eq 'RemoveSubject'){Remove-CorpusSubject $Root $Arguments.Id;return}
     if($Operation -eq 'Subject'){return Set-CorpusSubject $Root $Arguments.Name $Arguments.Id}
     if($Operation -eq 'Associate'){Set-CorpusChannelAssociation $Root $Arguments.SubjectId $Arguments.Url -Remove:([bool]$Arguments.Remove);return}
     $ctx=New-CorpusContext $Root $Shared
