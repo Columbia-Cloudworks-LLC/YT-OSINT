@@ -2,7 +2,7 @@
 
 A Windows-native PowerShell/WPF utility for collecting YouTube metadata and English transcripts into a local, searchable evidence corpus. Export a real Excel workbook, search neighboring transcript context, and open a video at the matching timestamp. No Excel installation, API key, web server, Python runtime, or database is required.
 
-**Validation status:** deterministic fixture tests and Windows WPF startup have been exercised. Live tests against both seeded channels were attempted with the machine's preserved yt-dlp 2025.01.26; current YouTube extraction failed. A successful full-channel transcript capture has **not** been demonstrated. See [validation details](docs/VALIDATION.md).
+**Validation status:** deterministic fixture tests and Windows WPF startup have been exercised. Live tests against both seeded channels were attempted with the machine's preserved yt-dlp 2025.01.26; those historical YouTube extraction attempts failed. A successful full-channel transcript capture has **not** been demonstrated. See [validation details](docs/VALIDATION.md).
 
 ![Actual WPF application](docs/screenshot.png)
 
@@ -63,6 +63,18 @@ Command-line equivalents (run from the repository):
 
 The CLI Update action is itself the explicit update request. Native commits elevate only after download/staging; ImportExcel stays unelevated. Pester is a development dependency pinned to supported major versions, and Windows PowerShell/.NET remain under Windows servicing.
 
+## Subtitle pacing and rate limits
+
+Imports reuse valid saved English transcripts before sending video requests. To fetch them again, select **Refresh saved transcripts** on Channels or **Refresh saved transcript** on Individual Videos. The command-line equivalent is `-RefreshTranscript`. Cached imports keep their original capture timestamps; missing or malformed cache files are fetched again.
+
+Caption selection prefers manual English, then original automatic English (`en-orig` when available). Translated URLs containing `tlang` are excluded, including translated entries mixed into a generic `en` track. Videos offering only translations are recorded as unavailable. The complete original metadata is retained; the downloader receives a separate copy containing only the selected caption track.
+
+Requests are sequential, with 10 seconds between yt-dlp invocations, 1 second between extraction requests, and 10 seconds before subtitle downloads. The app controls retries and disables yt-dlp's immediate subtitle re-extraction fallback.
+
+On HTTP 429, the entire sync queue pauses for **2, 4, then 8 minutes** before retrying. The status bar shows a countdown; Cancel remains available. A fourth 429 stops the run as **RateLimited**, without scheduling another video or channel. Completed metadata and transcripts remain saved; build the workbook separately if needed.
+
+Cooldown deadlines and retry counts are saved in `%LOCALAPPDATA%\YT-OSINT\youtube-requests.json`, shared across this user's corpora and preserved across restarts. After retry exhaustion, wait at least another 8 minutes before explicitly starting a new sync. Metadata success alone does not reset subtitle backoff; a successful caption request does. These delays reduce unnecessary traffic but cannot guarantee that YouTube will accept a request.
+
 ## Desktop workflow
 
 1. **Subjects:** select a subject, enter its display name, and rename it, or create another subject. Add channel URLs under the selected subject. Select an association to remove it; previously captured videos, observations, and transcripts remain.
@@ -88,6 +100,7 @@ Test-DependencyModule.ps1     Fresh-process module/workbook verification
 config.json                  User-managed subjects and channel URLs
 src/Corpus.Core.psm1          Atomic JSON, configuration, local queries
 src/Corpus.YouTube.psm1       yt-dlp adapter, captures, channel/video ingestion
+src/Corpus.RateLimit.psm1     Persistent pacing, cooldown, and bounded retries
 src/Corpus.Transcript.psm1    VTT parsing and rolling-caption normalization
 src/Corpus.Excel.psm1         ImportExcel/EPPlus workbook generation
 src/Corpus.Operations.psm1    Locking, run accounting, cancellation orchestration
@@ -108,7 +121,7 @@ tests/                       Offline Pester tests and separate live test runner
 
 Raw files use SHA256 content directories and stable channel/video identities, never titles. Identical downloads reuse the same file. Separate observation JSON records retain capture timestamps even when bytes do not change. Metadata snapshots preserve changing titles, descriptions, counters, names, and reported availability. Failure observations record inaccessible videos. Original metadata/subtitles are not edited during normalization.
 
-Canonical video records reference one completed transcript snapshot. Normalized segments have deterministic SHA256 identities based on video, source, language, start/end times, and text. Repeat imports replace the canonical pointer, rather than appending duplicate Excel rows. A failed caption refresh retains the last valid transcript and marks the latest attempt failed. Atomic sibling-file replacement prevents a partially written JSON file from becoming canonical. Abandoned `Running`/`CommittingWorkbook` run records are marked `Interrupted` when the next writer obtains the lock.
+Canonical video records reference one completed transcript snapshot. Normalized segments have deterministic SHA256 identities based on video, source, language, start/end times, and text. Repeat imports reuse valid saved transcripts. Explicit refreshes replace the canonical pointer without appending duplicate Excel rows. A failed caption refresh retains the last valid transcript and marks the latest attempt failed. Atomic sibling-file replacement prevents a partially written JSON file from becoming canonical. Abandoned `Running`/`CommittingWorkbook` run records are marked `Interrupted` when the next writer obtains the lock.
 
 VTT normalization decodes entities, removes VTT/HTML tags, joins wrapped lines, ignores blank cues and metadata blocks, and removes shared suffix/prefix words from overlapping or touching automatic cues. Manual dialogue and later intentional repetitions are retained. This is a conservative caption heuristic, not speech recognition; unusual caption editing patterns may still produce imperfect segmentation. Only English tracks with VTT renditions are imported. Raw captions remain available for auditing or future reprocessing.
 
@@ -116,7 +129,7 @@ VTT normalization decodes entities, removes VTT/HTML tags, joins wrapped lines, 
 
 The workbook contains **Videos**, **Transcript**, **Channels**, and **Runs**. Transcript rows include publication date, subject/channel/title, timestamp, text, source, capture time, and a genuine hyperlink such as `https://www.youtube.com/watch?v=VIDEO_ID&t=42s`. URLs round down to whole seconds. Tables support AutoFilter and Ctrl+F, freeze headers, wrap long text, and use numeric Excel date values.
 
-Untrusted captions/titles are stored as cell values, never formulas. Excel's 32,767-character cell limit truncates display values only; full text remains local. Transcript rows beyond Excel's worksheet limit continue in `Transcript_2`, etc. An excessive Videos sheet raises a clear error. Excel builds use a temporary workbook and atomic replacement; a locked destination leaves the previous workbook intact. Every sync automatically builds the workbook, even if some items failed. If the build fails, the finalized local run record is authoritative; the previous workbook may show older run information.
+Untrusted captions/titles are stored as cell values, never formulas. Excel's 32,767-character cell limit truncates display values only; full text remains local. Transcript rows beyond Excel's worksheet limit continue in `Transcript_2`, etc. An excessive Videos sheet raises a clear error. Excel builds use a temporary workbook and atomic replacement; a locked destination leaves the previous workbook intact. Syncs that reach completion automatically build the workbook, even if some items failed. Cancellation or exhausted rate-limit retries stop before that build; saved captures remain available for a separate workbook build. If the build fails, the finalized local run record is authoritative; the previous workbook may show older run information.
 
 Back up `config.json`, `data/`, and optionally `logs/`. Rebuild after restoring them with Build Excel; no live YouTube access is needed for export. Keep raw captures private unless you deliberately choose to share them. Git ignores all runtime corpus data, logs, and workbooks.
 
@@ -170,6 +183,7 @@ powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\YouTubeCorpus.ps1
 
 ## Troubleshooting and limits
 
+- **HTTP 429:** let the cooldown complete; repeated restarts do not clear it. After retries are exhausted, wait at least 8 minutes before starting another sync. Saved transcripts are reused by default.
 - **No English captions:** this is an explicit unavailable status, not a parsing success. No automatic speech-to-text fallback is attempted.
 - **YouTube extraction, private/deleted videos, sign-in, or rate limiting:** inspect the sanitized yt-dlp error in the run log. Retry later or review the installed yt-dlp version in Settings → Dependencies. Browser cookies and authenticated-only content are not configured by this version.
 - **No videos plus extractor warnings:** treated as a channel failure; raw listing remains available when a stable channel ID was resolved.

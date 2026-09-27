@@ -24,7 +24,7 @@ function Show-CorpusWindow {
         $ui[$name]=$window.FindName($name)
     }
     $state=@{Worker=$null;Handle=$null;Shared=$null;Operation='';Snapshot=$null;Ready=[bool]$SkipDependencies;Closing=$false;PendingSubject='';SmokeTicks=0;LastOutcome='Ready';CheckedStartup=(([bool]$SkipDependencies -or [bool]$SmokeTest) -and -not $SmokeCheckDependencies);RestartRequired=$false;RestartTicket=$null;DependencyRows=@()}
-    $mutators=@('CreateSubject','RenameSubject','AddChannel','RemoveChannel','SyncSelected','SyncAll','Refresh','CreateVideoSubject','ImportVideo','Build','Search','FilterCorpus')
+    $mutators=@('CreateSubject','RenameSubject','AddChannel','RemoveChannel','SyncSelected','SyncAll','Refresh','CreateVideoSubject','ImportVideo','Build','Search','FilterCorpus','RefreshChannelTranscripts','RefreshVideoTranscript')
     $ui.Paths.Text="Application and corpus root: $Root`nWorkbook: $(Join-Path $Root 'output/YouTubeCorpus.xlsx')`nSource configuration: $(Join-Path $Root 'config.json')`nNative dependencies: $(Get-CorpusNativeRoot)"
     $dependencySettings=Get-CorpusDependencySettings $Root
     $ui.DependencyChannel.SelectedIndex=if($dependencySettings.YtDlpChannel -eq 'nightly'){1}else{0}
@@ -48,7 +48,7 @@ function Show-CorpusWindow {
         $ps=[powershell]::Create()
         $null=$ps.AddScript({param($root,$op,$argsMap,$shared,$codeRoot)
             $ErrorActionPreference='Stop'
-            foreach($name in @('Logging','Core','Process','Dependencies','DependencyTransaction','Transcript','YouTube','Excel','Operations')){Import-Module (Join-Path $codeRoot "src/Corpus.$name.psm1") -Force -Global}
+            foreach($name in @('Logging','Core','Process','Dependencies','RateLimit','DependencyTransaction','Transcript','YouTube','Excel','Operations')){Import-Module (Join-Path $codeRoot "src/Corpus.$name.psm1") -Force -Global}
             if($op -eq 'Bootstrap') {
                 & (Join-Path $codeRoot 'Install-Dependencies.ps1') -Root $root -ProgressPath (Join-Path $root 'logs/bootstrap-progress.txt')
                 return 'Dependencies ready'
@@ -118,12 +118,12 @@ function Show-CorpusWindow {
     $ui.RenameSubject.Add_Click({try{$s=Get-SelectedSubject;Start-Work 'Subject' @{Name=$ui.SubjectName.Text;Id=$s.id}}catch{Show-UiError $_.Exception.Message}})
     $ui.AddChannel.Add_Click({try{$s=Get-SelectedSubject;Start-Work 'Associate' @{SubjectId=$s.id;Url=$ui.ChannelUrl.Text.Trim();Remove=$false}}catch{Show-UiError $_.Exception.Message}})
     $ui.RemoveChannel.Add_Click({try{$s=Get-SelectedSubject;if(-not $ui.SubjectChannels.SelectedItem){throw 'Select a channel association to remove.'};Start-Work 'Associate' @{SubjectId=$s.id;Url=$ui.SubjectChannels.SelectedItem.url;Remove=$true}}catch{Show-UiError $_.Exception.Message}})
-    $ui.SyncSelected.Add_Click({if($ui.ChannelsGrid.SelectedItem){Start-Work 'SyncChannel' @{Url=$ui.ChannelsGrid.SelectedItem.Url}}else{Show-UiError 'Select a channel first.'}})
-    $ui.SyncAll.Add_Click({Start-Work 'SyncAll'})
+    $ui.SyncSelected.Add_Click({if($ui.ChannelsGrid.SelectedItem){Start-Work 'SyncChannel' @{Url=$ui.ChannelsGrid.SelectedItem.Url;RefreshTranscript=[bool]$ui.RefreshChannelTranscripts.IsChecked}}else{Show-UiError 'Select a channel first.'}})
+    $ui.SyncAll.Add_Click({Start-Work 'SyncAll' @{RefreshTranscript=[bool]$ui.RefreshChannelTranscripts.IsChecked}})
     $ui.Refresh.Add_Click({Start-Work 'Refresh'})
     $ui.ClearVideoSubject.Add_Click({$ui.VideoSubject.SelectedIndex=-1})
     $ui.CreateVideoSubject.Add_Click({$state.PendingSubject=$ui.NewVideoSubject.Text.Trim();Start-Work 'Subject' @{Name=$state.PendingSubject;Id=''}})
-    $ui.ImportVideo.Add_Click({try{$url=Assert-CorpusYouTubeUrl $ui.VideoUrl.Text.Trim();$s=$ui.VideoSubject.SelectedItem;Start-Work 'Video' @{Url=$url;SubjectId=$(if($s){$s.id}else{''});SubjectName=$(if($s){$s.name}else{''})}}catch{Show-UiError $_.Exception.Message}})
+    $ui.ImportVideo.Add_Click({try{$url=Assert-CorpusYouTubeUrl $ui.VideoUrl.Text.Trim();$s=$ui.VideoSubject.SelectedItem;Start-Work 'Video' @{Url=$url;RefreshTranscript=[bool]$ui.RefreshVideoTranscript.IsChecked;SubjectId=$(if($s){$s.id}else{''});SubjectName=$(if($s){$s.name}else{''})}}catch{Show-UiError $_.Exception.Message}})
     $ui.Build.Add_Click({Start-Work 'Build'})
     $ui.FilterCorpus.Add_Click({Start-Work 'Filter' @{Text=$ui.CorpusFilter.Text}})
     $ui.ClearSearchSubject.Add_Click({$ui.SearchSubject.SelectedIndex=-1})
@@ -168,7 +168,7 @@ function Show-CorpusWindow {
                     'Filter' {$ui.CorpusGrid.ItemsSource=$result}
                     default {if($result.Count -and $result[-1].PSObject.Properties['FinalState']){$ui.Status.Text="$($result[-1].FinalState): $($result[-1].VideosDiscovered) discovered; $($result[-1].TranscriptsAdded) transcripts added; $($result[-1].TranscriptsUnavailable) unavailable; $($result[-1].Failures) failures"}}
                 }
-            }catch{$failed=$true;$state.WorkerError=$_.Exception.GetBaseException().Message;$ui.Status.Text=if($state.Shared.Cancel){'Cancelled; completed work preserved.'}else{'Operation failed; see Logs / Status.'};$ui.LogText.AppendText($_.Exception.GetBaseException().Message+"`r`n")}
+            }catch{$failed=$true;$state.WorkerError=$_.Exception.GetBaseException().Message;$ui.Status.Text=if($state.Shared.Cancel){'Cancelled; completed work preserved.'}elseif(Test-CorpusRateLimitError $_.Exception){'YouTube rate limit - sync stopped. Wait at least 8 minutes before retrying.'}else{'Operation failed; see Logs / Status.'};$ui.LogText.AppendText($_.Exception.GetBaseException().Message+"`r`n")}
             finally{if($op -in @('UpdateDependencies','RecoverDependencies')){$state.RestartRequired=(-not $failed -or [bool]$state.Shared.DependenciesChanged);$ui.DependencyNotice.Text=if($failed){'Update did not complete. See Logs / Status for details.'}else{'Updates complete. Restarting YT-OSINT…'}};if($op -ne 'Refresh'){$state.LastOutcome=$ui.Status.Text};$state.Worker.Dispose();$state.Worker=$null;$state.Handle=$null;$ui.Progress.IsIndeterminate=$false;$ui.Progress.Value=0;Set-Busy $false}
             if($state.Closing){$window.Close();return}
             if($op -eq 'Bootstrap' -and $failed){$ui.LogText.AppendText("Use Settings > Dependencies to check or recover dependencies, then restart.`r`n");Start-Work 'CheckDependencies' @{Channel=(Get-DependencyChannel);Force=$false}}

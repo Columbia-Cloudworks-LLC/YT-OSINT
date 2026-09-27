@@ -4,7 +4,7 @@ $ErrorActionPreference='Stop'
 $project=Split-Path $PSScriptRoot -Parent
 [IO.Directory]::CreateDirectory($TestRoot) | Out-Null
 Copy-Item (Join-Path $project config.json) (Join-Path $TestRoot config.json)
-foreach($name in @('Logging','Core','Process','Dependencies','Transcript','YouTube','Excel','Operations')){Import-Module (Join-Path $project "src/Corpus.$name.psm1") -Force -Global}
+foreach($name in @('Logging','Core','Process','Dependencies','RateLimit','Transcript','YouTube','Excel','Operations')){Import-Module (Join-Path $project "src/Corpus.$name.psm1") -Force -Global}
 & (Join-Path $project Install-Dependencies.ps1) -Root $TestRoot
 $results=@()
 foreach($iteration in 1..2) {

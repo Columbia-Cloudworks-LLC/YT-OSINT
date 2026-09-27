@@ -2,12 +2,12 @@
 function Get-CorpusYtArguments {
     $nativeRoot=Get-CorpusNativeRoot
     @('--ffmpeg-location',$nativeRoot,'--no-js-runtimes','--js-runtimes',('deno:'+(Join-Path $nativeRoot 'deno.exe')))
-    @('--ignore-config','--no-color','--no-progress','--encoding','utf-8','--socket-timeout','30','--retries','2','--extractor-retries','2','--skip-download')
+    @('--ignore-config','--no-color','--no-progress','--encoding','utf-8','--socket-timeout','30','--retries','0','--extractor-retries','0','--sleep-requests','1','--sleep-subtitles','10','--skip-download')
 }
 function Get-CorpusMetadata {
     param($Context,[string]$Url)
     $url=Assert-CorpusYouTubeUrl $Url
-    $r=Invoke-CorpusProcess $Context (Join-Path (Get-CorpusNativeRoot) 'yt-dlp.exe') ((Get-CorpusYtArguments)+@('--no-playlist','--dump-single-json','--',$url)) -Quiet
+    $r=Invoke-CorpusYouTubeProcess $Context ((Get-CorpusYtArguments)+@('--no-playlist','--dump-single-json','--',$url)) -Quiet
     if($r.ExitCode) { throw "yt-dlp metadata retrieval failed (exit $($r.ExitCode)). See the run log for details." }
     try { $meta=$r.StdOut | ConvertFrom-Json } catch { throw 'yt-dlp returned invalid metadata JSON.' }
     if((Get-CorpusProperty $meta id '') -notmatch '^[A-Za-z0-9_-]{11}$') { throw 'The URL did not resolve to an individual YouTube video.' }
@@ -24,13 +24,51 @@ function Select-CorpusSubtitle {
     param($Metadata)
     foreach($kind in @('subtitles','automatic_captions')) {
         $subs=Get-CorpusProperty $Metadata $kind
-        if(-not $subs) { continue }
-        $languages=@($subs.PSObject.Properties | ForEach-Object { $_.Name } | Where-Object { $_ -match '^en(?:[-_].+)?$' } | Sort-Object @{Expression={if($_ -eq 'en'){0}elseif($_ -eq 'en-orig'){1}else{2}}}, @{Expression={$_}})
-        foreach($language in $languages) {
-            if(@($subs.$language | Where-Object { (Get-CorpusProperty $_ ext '') -eq 'vtt' }).Count) { return [pscustomobject]@{Language=$language;Source=$(if($kind -eq 'subtitles'){'Manual'}else{'Automatic'})} }
+        if(-not $subs){continue}
+        $languages=@($subs.PSObject.Properties | ForEach-Object Name | Where-Object {$_ -match '^en(?:[-_].+)?$'} | Sort-Object @{Expression={if($_ -eq 'en-orig'){0}elseif($_ -eq 'en'){1}else{2}}}, @{Expression={$_}})
+        foreach($language in $languages){
+            $tracks=@($subs.$language | Where-Object {
+                $url=[string](Get-CorpusProperty $_ url '')
+                # Labels can mix original and translated URLs. Filter the actual tracks too.
+                (Get-CorpusProperty $_ ext '') -eq 'vtt' -and $url -and $url -notmatch '(?i)[?&]tlang='
+            })
+            if($tracks.Count){return [pscustomobject]@{Language=$language;Source=$(if($kind -eq 'subtitles'){'Manual'}else{'Automatic'});Track=$tracks[0]}}
         }
     }
     return $null
+}
+function Test-CorpusCachedTranscript {
+    param($Context,$Video)
+    if(-not $Video -or -not $Video.TranscriptAvailable -or -not $Video.TranscriptPath){return $false}
+    try {
+        $rows=@(Get-CorpusTranscript $Context.Root $Video)
+        if(-not $rows.Count){return $false}
+        foreach($row in $rows){
+            if($row.SegmentId -notmatch '^[a-f0-9]{64}$' -or $row.TranscriptSource -notin @('Manual','Automatic') -or $row.VideoId -ne $Video.VideoId -or [string]::IsNullOrWhiteSpace($row.TranscriptText) -or $row.Language -notmatch '^en(?:[-_].+)?$' -or $row.StartMilliseconds -lt 0 -or $row.EndMilliseconds -lt $row.StartMilliseconds){return $false}
+        }
+        return $true
+    } catch {return $false}
+}
+function Get-CorpusVideoIdFromUrl {
+    param([string]$Url)
+    $uri=[uri](Assert-CorpusYouTubeUrl $Url)
+    if($uri.Host -eq 'youtu.be' -and $uri.AbsolutePath -match '^/([A-Za-z0-9_-]{11})/?$'){return $Matches[1]}
+    if($uri.AbsolutePath -eq '/watch' -and $uri.Query -match '(?:\?|&)v=([A-Za-z0-9_-]{11})(?:&|$)'){return $Matches[1]}
+    if($uri.AbsolutePath -match '^/(?:shorts|live|embed)/([A-Za-z0-9_-]{11})/?$'){return $Matches[1]}
+    return ''
+}
+function Save-CorpusCaptionRequest {
+    param($Metadata,$Subtitle,[string]$Path)
+    # Work on a copy: immutable raw metadata remains complete evidence.
+    $copy=$Metadata | ConvertTo-Json -Depth 60 | ConvertFrom-Json
+    $copy | Add-Member NoteProperty subtitles ([pscustomobject]@{}) -Force
+    $copy | Add-Member NoteProperty automatic_captions ([pscustomobject]@{}) -Force
+    $kind=if($Subtitle.Source -eq 'Manual'){'subtitles'}else{'automatic_captions'}
+    $copy.$kind | Add-Member NoteProperty $Subtitle.Language @($Subtitle.Track) -Force
+    foreach($key in @('requested_subtitles','webpage_url','original_url')){$copy.PSObject.Properties.Remove($key)}
+    # No re-extraction fallback. --abort-on-error makes caption errors visible on stderr;
+    # the scheduler owns retries, and imports still require a valid VTT.
+    Write-CorpusJson $Path $copy
 }
 function Save-CorpusRawArtifact {
     param([string]$Directory,[string]$FileName,[string]$Text,[string]$SourcePath='')
@@ -47,8 +85,18 @@ function Save-CorpusRawArtifact {
     return $path
 }
 function Import-CorpusVideo {
-    param($Context,[string]$Url,[string]$SubjectId='',[string]$SubjectName='',$Run=$null)
+    param($Context,[string]$Url,[string]$SubjectId='',[string]$SubjectName='',$Run=$null,[switch]$RefreshTranscript)
     Test-CorpusCancellation $Context
+    $cachedId=Get-CorpusVideoIdFromUrl $Url
+    $cached=if($cachedId){Read-CorpusJson (Join-Path $Context.Root "data/normalized/videos/$cachedId.json")}else{$null}
+    if(-not $RefreshTranscript -and (Test-CorpusCachedTranscript $Context $cached)){
+        if($Run){$Run.VideosAlreadyKnown++}
+        if($SubjectId){$cached.SubjectId=$SubjectId;$cached.SubjectName=$SubjectName}
+        $cached.LastSyncStatus='Success';$cached.LastError='';$cached.LastAttemptAt=[datetime]::UtcNow.ToString('o')
+        Save-CorpusVideo $Context $cached
+        Write-CorpusLog $Context Info Subtitles $cachedId 'Reused saved transcript; no video requests sent.'
+        return $cached
+    }
     Set-CorpusProgress $Context 'Metadata retrieval' $Url
     $capture=Get-CorpusMetadata $Context $Url; $meta=$capture.Metadata
     $v=ConvertTo-CorpusVideo $meta $SubjectId $SubjectName
@@ -61,7 +109,7 @@ function Import-CorpusVideo {
     $v.RawMetadataPath=$raw.Substring($Context.Root.Length+1)
     # Each observation records its capture time, even when artifact bytes are identical.
     Write-CorpusJson (Join-Path $rawDir "observations/$($Context.RunId)-$([datetime]::UtcNow.Ticks).json") ([ordered]@{CapturedAt=$v.MetadataCapturedAt;MetadataPath=$v.RawMetadataPath;RunId=$Context.RunId})
-    if($old -and $old.TranscriptAvailable) {
+    if(Test-CorpusCachedTranscript $Context $old) {
         $v.TranscriptPath=$old.TranscriptPath; $v.TranscriptAvailable=$true; $v.TranscriptCapturedAt=$old.TranscriptCapturedAt; $v.SubtitleSource=$old.SubtitleSource
     }
     # Commit metadata before captions so a caption failure never discards it.
@@ -71,14 +119,16 @@ function Import-CorpusVideo {
         if(-not $sub) {
             if(-not $v.TranscriptAvailable) { $v.LastSyncStatus='Unavailable' } else { $v.LastSyncStatus='CaptionsNoLongerAvailable' }
             if($Run) { $Run.TranscriptsUnavailable++ }
-            Write-CorpusLog $Context Warning Subtitles $v.VideoId "Transcript unavailable for $($v.VideoId): no English manual or automatic VTT subtitles were reported by yt-dlp."
+            Write-CorpusLog $Context Warning Subtitles $v.VideoId "Transcript unavailable for $($v.VideoId): no original English VTT subtitles were available; translated tracks are excluded."
         } else {
             Set-CorpusProgress $Context 'Subtitle retrieval' $v.VideoTitle
             $stage=Join-Path $Context.Root "data/staging/$($Context.RunId)/$($v.VideoId)"
             [IO.Directory]::CreateDirectory($stage) | Out-Null
             try {
+                $request=Join-Path $stage 'caption-request.json'
+                Save-CorpusCaptionRequest $meta $sub $request
                 $flag=if($sub.Source -eq 'Manual'){'--write-subs'}else{'--write-auto-subs'}
-                $r=Invoke-CorpusProcess $Context (Join-Path (Get-CorpusNativeRoot) 'yt-dlp.exe') ((Get-CorpusYtArguments)+@('--load-info-json',$raw,$flag,'--sub-langs',$sub.Language,'--sub-format','vtt','--output',(Join-Path $stage '%(id)s.%(ext)s')))
+                $r=Invoke-CorpusYouTubeProcess $Context ((Get-CorpusYtArguments)+@('--load-info-json',$request,'--abort-on-error',$flag,'--sub-langs',$sub.Language,'--sub-format','vtt','--output',(Join-Path $stage '%(id)s.%(ext)s'))) -Kind Subtitle
                 if($r.ExitCode) { throw "Subtitle retrieval failed (yt-dlp exit $($r.ExitCode))." }
                 $file=@(Get-ChildItem $stage -Filter '*.vtt')
                 if(-not $file.Count) { throw 'yt-dlp reported captions but did not produce a VTT file.' }
@@ -93,6 +143,7 @@ function Import-CorpusVideo {
             } finally { if(Test-Path $stage) { Remove-Item -LiteralPath $stage -Recurse -Force } }
         }
     } catch {
+        if(Test-CorpusRateLimitError $_.Exception){$v.LastSyncStatus='RateLimited';$v.LastError=$_.Exception.Message;Save-CorpusVideo $Context $v;throw}
         if($_.Exception -is [OperationCanceledException]) { $v.LastSyncStatus='Cancelled'; Save-CorpusVideo $Context $v; throw }
         $v.LastSyncStatus='Failed'; $v.LastError=$_.Exception.Message
         if($Run){$Run.Failures++}
@@ -111,16 +162,16 @@ function Save-CorpusFailure {
     Write-CorpusJson (Join-Path $Context.Root "data/raw/$ChannelId/$VideoId/observations/$($Context.RunId)-$([datetime]::UtcNow.Ticks)-failure.json") ([ordered]@{CapturedAt=$v.LastAttemptAt;Status='Failed';Message=$Message})
 }
 function Sync-CorpusChannel {
-    param($Context,[string]$Url,[string]$SubjectId,[string]$SubjectName,$Run,[int]$Limit=0)
+    param($Context,[string]$Url,[string]$SubjectId,[string]$SubjectName,$Run,[int]$Limit=0,[switch]$RefreshTranscript)
     $url=Assert-CorpusYouTubeUrl $Url
     $attempt=[datetime]::UtcNow.ToString('o'); $key=Get-CorpusId $url
     Write-CorpusJson (Join-Path $Context.Root "data/normalized/channel-attempts/$key.json") ([ordered]@{Url=$url;LastAttempt=$attempt;Status='Running'})
-    $channel=$null
+    $channel=$null;$attemptStatus='Failed'
     try {
         Set-CorpusProgress $Context 'Channel enumeration' $url 0 0
         $args=(Get-CorpusYtArguments)+@('--flat-playlist','--dump-single-json','--ignore-errors')
         if($Limit -gt 0){$args+=@('--playlist-end',"$Limit")}
-        $r=Invoke-CorpusProcess $Context (Join-Path (Get-CorpusNativeRoot) 'yt-dlp.exe') ($args+@('--',$url)) -TimeoutSeconds 1800 -Quiet
+        $r=Invoke-CorpusYouTubeProcess $Context ($args+@('--',$url)) -Kind Enumeration -TimeoutSeconds 1800 -Quiet
         if($r.ExitCode){throw "Channel enumeration failed (yt-dlp exit $($r.ExitCode))."}
         $listing=$r.StdOut | ConvertFrom-Json
         $id=Get-CorpusProperty $listing channel_id (Get-CorpusProperty $listing id '')
@@ -149,9 +200,9 @@ function Sync-CorpusChannel {
         foreach($e in $entries) {
             Test-CorpusCancellation $Context; $n++
             Set-CorpusProgress $Context "Syncing $($channel.ChannelName)" $e.id $n $entries.Count
-            try { $null=Import-CorpusVideo $Context "https://www.youtube.com/watch?v=$($e.id)" $SubjectId $SubjectName $Run }
+            try { $null=Import-CorpusVideo $Context "https://www.youtube.com/watch?v=$($e.id)" $SubjectId $SubjectName $Run -RefreshTranscript:$RefreshTranscript }
             catch {
-                if($_.Exception -is [OperationCanceledException]){throw}
+                if($_.Exception -is [OperationCanceledException] -or (Test-CorpusRateLimitError $_.Exception)){throw}
                 $Run.Failures++; Save-CorpusFailure $Context $e.id $_.Exception.Message $SubjectId $SubjectName $id
                 Write-CorpusLog $Context Error Video $e.id $_.Exception.Message $_.ToString()
             }
@@ -162,11 +213,12 @@ function Sync-CorpusChannel {
         $channel.Failures=$Run.Failures-$before; $channel.Status=if($channel.Failures){'Partial'}else{'Success'}
         if(-not $channel.Failures){$channel.LastSync=[datetime]::UtcNow.ToString('o')}
     } catch {
-        if($channel){$channel.Status=if($_.Exception -is [OperationCanceledException]){'Cancelled'}else{'Failed'}}
+        if(Test-CorpusRateLimitError $_.Exception){$attemptStatus='RateLimited'}
+        if($channel){$channel.Status=if(Test-CorpusRateLimitError $_.Exception){'RateLimited'}elseif($_.Exception -is [OperationCanceledException]){'Cancelled'}else{'Failed'}}
         throw
     } finally {
         if($channel){Write-CorpusJson (Join-Path $Context.Root "data/normalized/channels/$($channel.ChannelId).json") $channel}
-        Write-CorpusJson (Join-Path $Context.Root "data/normalized/channel-attempts/$key.json") ([ordered]@{Url=$url;LastAttempt=$attempt;Status=$(if($channel){$channel.Status}elseif($Context.Shared -and $Context.Shared.Cancel){'Cancelled'}else{'Failed'})})
+        Write-CorpusJson (Join-Path $Context.Root "data/normalized/channel-attempts/$key.json") ([ordered]@{Url=$url;LastAttempt=$attempt;Status=$(if($channel){$channel.Status}elseif($Context.Shared -and $Context.Shared.Cancel){'Cancelled'}else{$attemptStatus})})
     }
 }
 Export-ModuleMember -Function *-Corpus*

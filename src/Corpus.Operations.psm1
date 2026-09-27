@@ -35,9 +35,9 @@ function Invoke-CorpusOperation {
             'Refresh' {return [pscustomobject]@{Config=(Get-CorpusConfig $Root);Videos=@(Get-CorpusVideos $Root);Channels=@(Get-ChildItem (Join-Path $Root 'data/normalized/channels') -Filter '*.json' | ForEach-Object {Read-CorpusJson $_.FullName});Attempts=@(Get-ChildItem (Join-Path $Root 'data/normalized/channel-attempts') -Filter '*.json' -ErrorAction SilentlyContinue | ForEach-Object {Read-CorpusJson $_.FullName})}}
             'Video' {
                 $run.VideosDiscovered=1
-                try{$null=Import-CorpusVideo $ctx $Arguments.Url $Arguments.SubjectId $Arguments.SubjectName $run}
+                try{$null=Import-CorpusVideo $ctx $Arguments.Url $Arguments.SubjectId $Arguments.SubjectName $run -RefreshTranscript:([bool]$Arguments['RefreshTranscript'])}
                 catch {
-                    if($_.Exception -is [OperationCanceledException]){throw}
+                    if($_.Exception -is [OperationCanceledException] -or (Test-CorpusRateLimitError $_.Exception)){throw}
                     $uri=[uri]$Arguments.Url; $id=''
                     if($uri.Host -eq 'youtu.be'){$id=$uri.AbsolutePath.Trim('/')}elseif($uri.Query -match '(?:\?|&)v=([A-Za-z0-9_-]{11})'){$id=$Matches[1]}elseif($uri.AbsolutePath -match '/(?:shorts|live)/([A-Za-z0-9_-]{11})'){$id=$Matches[1]}
                     Save-CorpusFailure $ctx $id $_.Exception.Message $Arguments.SubjectId $Arguments.SubjectName
@@ -51,8 +51,8 @@ function Invoke-CorpusOperation {
                 $run.ChannelsRequested=$sources.Count
                 foreach($source in $sources) {
                     Test-CorpusCancellation $ctx
-                    try{$limit=0;if($Arguments.ContainsKey('Limit')){$limit=[int]$Arguments.Limit};Sync-CorpusChannel $ctx $source.Url $source.SubjectId $source.SubjectName $run $limit}
-                    catch{if($_.Exception -is [OperationCanceledException]){throw};$run.Failures++;Write-CorpusLog $ctx Error Channel $source.Url $_.Exception.Message $_.ToString()}
+                    try{$limit=0;if($Arguments.ContainsKey('Limit')){$limit=[int]$Arguments.Limit};Sync-CorpusChannel $ctx $source.Url $source.SubjectId $source.SubjectName $run $limit -RefreshTranscript:([bool]$Arguments['RefreshTranscript'])}
+                    catch{if($_.Exception -is [OperationCanceledException] -or (Test-CorpusRateLimitError $_.Exception)){throw};$run.Failures++;Write-CorpusLog $ctx Error Channel $source.Url $_.Exception.Message $_.ToString()}
                 }
             }
             'Build' {}
@@ -70,7 +70,7 @@ function Invoke-CorpusOperation {
             return $run
         }
     } catch {
-        if($run){$run.FinalState=if(($Shared -and $Shared.Cancel) -or $_.Exception -is [OperationCanceledException]){'Cancelled'}else{'Failed'};if($run.FinalState -eq 'Failed'){$run.Failures++};$run.EndTimestamp=[datetime]::UtcNow.ToString('o')}
+        if($run){$run.FinalState=if(($Shared -and $Shared.Cancel) -or $_.Exception -is [OperationCanceledException]){'Cancelled'}elseif(Test-CorpusRateLimitError $_.Exception){'RateLimited'}else{'Failed'};if($run.FinalState -in @('Failed','RateLimited')){$run.Failures++};$run.EndTimestamp=[datetime]::UtcNow.ToString('o')}
         Write-CorpusLog $ctx Error $Operation '' $_.Exception.Message $_.ToString()
         throw
     } finally {

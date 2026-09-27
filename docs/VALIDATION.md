@@ -2,6 +2,12 @@
 
 Validated on 2026-09-26. This report distinguishes deterministic application checks from network-dependent acceptance.
 
+## Subtitle rate-limit handling
+
+The full deterministic suite passes **79 tests**. New coverage checks original-English preference, mixed translated/original URL filtering, cache validation and reuse, explicit refresh, request spacing, timezone-safe persisted cooldowns, cancellation during the countdown, 2/4/8-minute backoff, retry exhaustion, and stopping subsequent videos and channels. It also verifies that the rate-limit reason survives the asynchronous GUI worker boundary and that a native process emitting HTTP 429 is interrupted promptly.
+
+`tests/Invoke-RateLimitIntegration.ps1` ran the installed yt-dlp against a loopback HTTP fixture. It made exactly one request when the server returned 429, exposed the error without re-extracting the video, then made one request when the server returned a valid VTT and normalized that caption successfully. No media or YouTube requests were made. This check supplements mocked retry tests; it does not demonstrate that YouTube will lift a live restriction.
+
 ## User-folder installation and automatic restart
 
 The native dependency location is now `%LOCALAPPDATA%\YT-OSINT\bin`. A real first installation downloaded and verified yt-dlp 2026.08.19, FFmpeg/ffprobe 9.0.2, and Deno 2.9.7 without elevation. The user removed the previous Windows-directory binaries; they are no longer required. ImportExcel 7.8.10 was already available in the user's module directory.

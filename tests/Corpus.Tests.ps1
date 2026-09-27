@@ -1,5 +1,5 @@
 ﻿$project=Split-Path $PSScriptRoot -Parent
-foreach($name in @('Logging','Core','Process','Dependencies','Transcript','YouTube','Excel','Operations')){Import-Module (Join-Path $project "src/Corpus.$name.psm1") -Force -Global}
+foreach($name in @('Logging','Core','Process','Dependencies','RateLimit','Transcript','YouTube','Excel','Operations')){Import-Module (Join-Path $project "src/Corpus.$name.psm1") -Force -Global}
 $fixture=Get-Content (Join-Path $PSScriptRoot 'fixtures/video.info.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $vtt=Join-Path $PSScriptRoot 'fixtures/rolling.en.vtt'
 Describe 'Configuration and stable identities' {
@@ -169,8 +169,8 @@ Describe 'Fixture acquisition workflow through the YouTube adapter' {
             $raw=[IO.File]::ReadAllText((Join-Path $Context.Root fixture.info.json))
             [pscustomobject]@{Metadata=($raw | ConvertFrom-Json);Raw=$raw}
         }
-        Mock Invoke-CorpusProcess -ModuleName Corpus.YouTube {
-            param($Context,$Executable,$Arguments)
+        Mock Invoke-CorpusYouTubeProcess -ModuleName Corpus.YouTube {
+            param($Context,$Arguments)
             $index=[Array]::IndexOf($Arguments,'--output')
             $dir=Split-Path $Arguments[$index+1] -Parent
             Copy-Item (Join-Path $Context.Root fixture.vtt) (Join-Path $dir 'abcDEF12_-3.en.vtt')
@@ -187,19 +187,19 @@ Describe 'Fixture acquisition workflow through the YouTube adapter' {
         @($rows.SegmentId | Sort-Object -Unique).Count | Should Be 6
         @(Get-ChildItem (Join-Path $root data/raw) -Recurse -Filter '*.vtt').Count | Should Be 1
         @(Get-ChildItem (Join-Path $root data/raw) -Recurse -Filter '*.info.json').Count | Should Be 1
-        @(Get-ChildItem (Join-Path $root data/raw) -Recurse -Filter '*.json' | Where-Object DirectoryName -match observations).Count | Should Be 2
+        @(Get-ChildItem (Join-Path $root data/raw) -Recurse -Filter '*.json' | Where-Object DirectoryName -match observations).Count | Should Be 1
         $a.LastSyncStatus | Should Be Success;$b.LastSyncStatus | Should Be Success
     }
     It 'keeps a previous transcript when the next subtitle download fails' {
         $first=Import-CorpusVideo $ctx 'https://www.youtube.com/watch?v=abcDEF12_-3' mo Mo
-        Mock Invoke-CorpusProcess -ModuleName Corpus.YouTube { [pscustomobject]@{StdOut='';StdErr='rate limited';ExitCode=1} }
-        $second=Import-CorpusVideo (New-CorpusContext $root) 'https://www.youtube.com/watch?v=abcDEF12_-3' mo Mo
+        Mock Invoke-CorpusYouTubeProcess -ModuleName Corpus.YouTube { [pscustomobject]@{StdOut='';StdErr='rate limited';ExitCode=1} }
+        $second=Import-CorpusVideo (New-CorpusContext $root) 'https://www.youtube.com/watch?v=abcDEF12_-3' mo Mo -RefreshTranscript
         $second.LastSyncStatus | Should Be Failed
         $second.TranscriptPath | Should Be $first.TranscriptPath
         @(Get-CorpusTranscript $root $second).Count | Should Be 6
     }
     It 'continues to the second video when the first video fails' {
-        Mock Invoke-CorpusProcess -ModuleName Corpus.YouTube {
+        Mock Invoke-CorpusYouTubeProcess -ModuleName Corpus.YouTube {
             [pscustomobject]@{ExitCode=0;StdErr='';StdOut='{"id":"UC1234567890123456789012","channel_id":"UC1234567890123456789012","channel":"Fixture","entries":[{"id":"badDEF12_-3"},{"id":"abcDEF12_-3"}]}'}
         }
         Mock Import-CorpusVideo -ModuleName Corpus.YouTube {
