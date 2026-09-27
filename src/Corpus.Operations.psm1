@@ -19,7 +19,7 @@ function Invoke-CorpusOperation {
                 $prior=Read-CorpusJson $file.FullName
                 if($prior.FinalState -in @('Running','CommittingWorkbook')){$prior.FinalState='Interrupted';$prior.EndTimestamp=[datetime]::UtcNow.ToString('o');Write-CorpusJson $file.FullName $prior}
             }
-            $run=[pscustomobject][ordered]@{RunId=$ctx.RunId;StartTimestamp=[datetime]::UtcNow.ToString('o');EndTimestamp=$null;Machine=$env:COMPUTERNAME;WindowsVersion=[Environment]::OSVersion.VersionString;PowerShellVersion=$PSVersionTable.PSVersion.ToString();YtDlpVersion='Unavailable';FFmpegVersion='Unavailable';ImportExcelVersion='Unavailable';ChannelsRequested=0;VideosDiscovered=0;VideosAdded=0;VideosAlreadyKnown=0;TranscriptsAdded=0;TranscriptsUnavailable=0;Failures=0;FinalState='Running'}
+            $run=[pscustomobject][ordered]@{RunId=$ctx.RunId;StartTimestamp=[datetime]::UtcNow.ToString('o');EndTimestamp=$null;Machine=$env:COMPUTERNAME;WindowsVersion=[Environment]::OSVersion.VersionString;PowerShellVersion=$PSVersionTable.PSVersion.ToString();YtDlpVersion='Unavailable';FFmpegVersion='Unavailable';ImportExcelVersion='Unavailable';ChannelsRequested=0;VideosDiscovered=0;VideosAdded=0;VideosAlreadyKnown=0;TranscriptsAdded=0;TranscriptsUnavailable=0;MembersOnlySkipped=0;Failures=0;FinalState='Running'}
             Write-CorpusJson (Join-Path $Root "data/normalized/runs/$($ctx.RunId).json") $run
             foreach($name in @('yt-dlp','ffmpeg')) {
                 try {$r=Invoke-CorpusProcess $ctx (Join-Path (Get-CorpusNativeRoot) "$name.exe") @($(if($name -eq 'yt-dlp'){'--version'}else{'-version'})) -Quiet; if($r.ExitCode -eq 0){$value=($r.StdOut -split '\r?\n')[0];if($name -eq 'yt-dlp'){$run.YtDlpVersion=$value}else{$run.FFmpegVersion=$value}}}catch{Write-CorpusLog $ctx Warning Versions $name $_.Exception.Message}
@@ -64,9 +64,9 @@ function Invoke-CorpusOperation {
             Write-CorpusJson (Join-Path $Root "data/normalized/runs/$($ctx.RunId).json") $run
             # The workbook displays the intended final state; canonical state remains recoverable until commit.
             $view=$run | Select-Object *; $view.FinalState=$finalState
-            $null=Export-CorpusWorkbook $ctx -RunOverride $view
+            if($Operation -eq 'Build' -or -not $Arguments['SkipWorkbook']){$null=Export-CorpusWorkbook $ctx -RunOverride $view}
             $run.FinalState=$finalState
-            Write-CorpusLog $ctx Info Summary '' "$($run.VideosDiscovered) discovered; $($run.VideosAdded) new; $($run.VideosAlreadyKnown) known; $($run.TranscriptsAdded) transcripts added; $($run.TranscriptsUnavailable) unavailable; $($run.Failures) failures. $($run.FinalState)."
+            Write-CorpusLog $ctx Info Summary '' "$($run.VideosDiscovered) discovered; $($run.VideosAdded) new; $($run.VideosAlreadyKnown) known; $($run.TranscriptsAdded) transcripts added; $($run.TranscriptsUnavailable) unavailable; $($run.MembersOnlySkipped) members-only skipped; $($run.Failures) failures. $($run.FinalState)."
             return $run
         }
     } catch {

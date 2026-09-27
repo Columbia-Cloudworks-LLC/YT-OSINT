@@ -8,10 +8,11 @@ function Get-CorpusMetadata {
     param($Context,[string]$Url)
     $url=Assert-CorpusYouTubeUrl $Url
     $r=Invoke-CorpusYouTubeProcess $Context ((Get-CorpusYtArguments)+@('--no-playlist','--dump-single-json','--',$url)) -Quiet
+    if((Get-CorpusProperty $r MembersOnly $false) -or ($r.ExitCode -ne 0 -and (Test-CorpusMembersOnlyMessage $r.StdErr))){return [pscustomobject]@{MembersOnly=$true;Metadata=$null;Raw=''}}
     if($r.ExitCode) { throw "yt-dlp metadata retrieval failed (exit $($r.ExitCode)). See the run log for details." }
     try { $meta=$r.StdOut | ConvertFrom-Json } catch { throw 'yt-dlp returned invalid metadata JSON.' }
     if((Get-CorpusProperty $meta id '') -notmatch '^[A-Za-z0-9_-]{11}$') { throw 'The URL did not resolve to an individual YouTube video.' }
-    return [pscustomobject]@{Metadata=$meta;Raw=$r.StdOut}
+    return [pscustomobject]@{Metadata=$meta;Raw=$r.StdOut;MembersOnly=((Get-CorpusProperty $meta availability '') -eq 'subscriber_only')}
 }
 function ConvertTo-CorpusVideo {
     param($Metadata,[string]$SubjectId='',[string]$SubjectName='',[string]$CapturedAt=([datetime]::UtcNow.ToString('o')))
@@ -84,11 +85,35 @@ function Save-CorpusRawArtifact {
     }
     return $path
 }
+function Save-CorpusMembersOnlyVideo {
+    param($Context,[string]$VideoId,[string]$SubjectId,[string]$SubjectName,$Run=$null,$ListingEntry=$null)
+    $video=Read-CorpusJson (Join-Path $Context.Root "data/normalized/videos/$VideoId.json")
+    if(-not $video){
+        if(-not $ListingEntry){$ListingEntry=[pscustomobject]@{id=$VideoId}}
+        $video=ConvertTo-CorpusVideo $ListingEntry $SubjectId $SubjectName
+        $video.MetadataCapturedAt=$null
+    }
+    if($SubjectId){$video.SubjectId=$SubjectId;$video.SubjectName=$SubjectName}
+    if($ListingEntry){
+        if($video.VideoTitle -eq $VideoId -and (Get-CorpusProperty $ListingEntry title '')){$video.VideoTitle=$ListingEntry.title}
+        if($video.ChannelId -eq 'unknown' -and (Get-CorpusProperty $ListingEntry channel_id '')){$video.ChannelId=$ListingEntry.channel_id}
+        if((-not $video.ChannelName -or $video.ChannelName -eq 'Unknown') -and (Get-CorpusProperty $ListingEntry channel '')){$video.ChannelName=$ListingEntry.channel}
+    }
+    $video.LastSyncStatus='SkippedMembersOnly';$video.LastError='';$video.LastAttemptAt=[datetime]::UtcNow.ToString('o')
+    Save-CorpusVideo $Context $video
+    if($Run){
+        if(-not $Run.PSObject.Properties['MembersOnlySkipped']){$Run | Add-Member NoteProperty MembersOnlySkipped 0}
+        $Run.MembersOnlySkipped++
+    }
+    Write-CorpusLog $Context Info Video $VideoId 'Skipped members-only video.'
+    return $video
+}
 function Import-CorpusVideo {
-    param($Context,[string]$Url,[string]$SubjectId='',[string]$SubjectName='',$Run=$null,[switch]$RefreshTranscript)
+    param($Context,[string]$Url,[string]$SubjectId='',[string]$SubjectName='',$Run=$null,[switch]$RefreshTranscript,$ListingEntry=$null)
     Test-CorpusCancellation $Context
     $cachedId=Get-CorpusVideoIdFromUrl $Url
     $cached=if($cachedId){Read-CorpusJson (Join-Path $Context.Root "data/normalized/videos/$cachedId.json")}else{$null}
+    if(-not $RefreshTranscript -and $cached -and $cached.LastSyncStatus -eq 'SkippedMembersOnly' -and (Get-CorpusProperty $ListingEntry availability '') -notin @('public','unlisted')){return Save-CorpusMembersOnlyVideo $Context $cachedId $SubjectId $SubjectName $Run $ListingEntry}
     if(-not $RefreshTranscript -and (Test-CorpusCachedTranscript $Context $cached)){
         if($Run){$Run.VideosAlreadyKnown++}
         if($SubjectId){$cached.SubjectId=$SubjectId;$cached.SubjectName=$SubjectName}
@@ -99,6 +124,11 @@ function Import-CorpusVideo {
     }
     Set-CorpusProgress $Context 'Metadata retrieval' $Url
     $capture=Get-CorpusMetadata $Context $Url; $meta=$capture.Metadata
+    if(Get-CorpusProperty $capture MembersOnly $false){
+        $id=if($meta){Get-CorpusProperty $meta id $cachedId}else{$cachedId}
+        if($id -notmatch '^[A-Za-z0-9_-]{11}$'){throw 'Cannot identify the members-only video.'}
+        return Save-CorpusMembersOnlyVideo $Context $id $SubjectId $SubjectName $Run $ListingEntry
+    }
     $v=ConvertTo-CorpusVideo $meta $SubjectId $SubjectName
     $old=Read-CorpusJson (Join-Path $Context.Root "data/normalized/videos/$($v.VideoId).json")
     if($Run) { if($old){$Run.VideosAlreadyKnown++}else{$Run.VideosAdded++} }
@@ -184,7 +214,7 @@ function Sync-CorpusChannel {
             if($owner.Count -and @($owner[0].channels | Where-Object { $_.url -in $old.Urls }).Count) { throw 'This channel ID is already explicitly assigned to another subject.' }
         }
         $urls=@($url); if($old){$urls=@($old.Urls)+$url | Select-Object -Unique}
-        $channel=[pscustomobject]@{SubjectId=$SubjectId;Subject=$SubjectName;ChannelName=(Get-CorpusProperty $listing channel (Get-CorpusProperty $listing title $id));ChannelId=$id;Handle=(Get-CorpusProperty $listing uploader_id '');Url=$url;Urls=@($urls);FirstCaptured=$(if($old){$old.FirstCaptured}else{$attempt});LastSync=$(if($old){$old.LastSync}else{$null});LastAttempt=$attempt;VideosDiscovered=0;TranscriptCount=0;WithoutTranscripts=0;Failures=0;Status='Running'}
+        $channel=[pscustomobject]@{SubjectId=$SubjectId;Subject=$SubjectName;ChannelName=(Get-CorpusProperty $listing channel (Get-CorpusProperty $listing title $id));ChannelId=$id;Handle=(Get-CorpusProperty $listing uploader_id '');Url=$url;Urls=@($urls);FirstCaptured=$(if($old){$old.FirstCaptured}else{$attempt});LastSync=$(if($old){$old.LastSync}else{$null});LastAttempt=$attempt;VideosDiscovered=0;TranscriptCount=0;WithoutTranscripts=0;Failures=0;Status='Running';MembersOnlySkipped=0}
         $null=Save-CorpusRawArtifact (Join-Path $Context.Root "data/raw/$id/channel") 'channel.info.json' $r.StdOut
         $entries=[Collections.Generic.List[object]]::new(); $seen=@{}
         function Add-Entries($node) {
@@ -196,11 +226,18 @@ function Sync-CorpusChannel {
         if($Limit -gt 0 -and $entries.Count -gt $Limit){$entries=@($entries | Select-Object -First $Limit)}
         $Run.VideosDiscovered+=$entries.Count; $channel.VideosDiscovered=$entries.Count
         Write-CorpusJson (Join-Path $Context.Root "data/normalized/channels/$id.json") $channel
-        $n=0; $before=$Run.Failures
+        if(-not $Run.PSObject.Properties['MembersOnlySkipped']){$Run | Add-Member NoteProperty MembersOnlySkipped 0}
+        $n=0; $before=$Run.Failures; $skippedBefore=$Run.MembersOnlySkipped
         foreach($e in $entries) {
             Test-CorpusCancellation $Context; $n++
             Set-CorpusProgress $Context "Syncing $($channel.ChannelName)" $e.id $n $entries.Count
-            try { $null=Import-CorpusVideo $Context "https://www.youtube.com/watch?v=$($e.id)" $SubjectId $SubjectName $Run -RefreshTranscript:$RefreshTranscript }
+            try {
+                if(-not (Get-CorpusProperty $e channel_id '')){$e | Add-Member NoteProperty channel_id $id -Force}
+                if(-not (Get-CorpusProperty $e channel '')){$e | Add-Member NoteProperty channel $channel.ChannelName -Force}
+                if((Get-CorpusProperty $e availability '') -eq 'subscriber_only'){
+                    $null=Save-CorpusMembersOnlyVideo $Context $e.id $SubjectId $SubjectName $Run $e
+                } else {$null=Import-CorpusVideo $Context "https://www.youtube.com/watch?v=$($e.id)" $SubjectId $SubjectName $Run -RefreshTranscript:$RefreshTranscript -ListingEntry $e}
+            }
             catch {
                 if($_.Exception -is [OperationCanceledException] -or (Test-CorpusRateLimitError $_.Exception)){throw}
                 $Run.Failures++; Save-CorpusFailure $Context $e.id $_.Exception.Message $SubjectId $SubjectName $id
@@ -210,6 +247,7 @@ function Sync-CorpusChannel {
         $videos=@(Get-CorpusVideos $Context.Root | Where-Object ChannelId -eq $id)
         $channel.TranscriptCount=@($videos | Where-Object TranscriptAvailable).Count
         $channel.WithoutTranscripts=@($videos | Where-Object {-not $_.TranscriptAvailable}).Count
+        $channel.MembersOnlySkipped=$Run.MembersOnlySkipped-$skippedBefore
         $channel.Failures=$Run.Failures-$before; $channel.Status=if($channel.Failures){'Partial'}else{'Success'}
         if(-not $channel.Failures){$channel.LastSync=[datetime]::UtcNow.ToString('o')}
     } catch {

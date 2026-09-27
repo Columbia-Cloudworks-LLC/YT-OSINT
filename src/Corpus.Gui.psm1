@@ -1,4 +1,5 @@
 ﻿Set-StrictMode -Version 2
+Import-Module (Join-Path $PSScriptRoot 'Corpus.Viewer.psm1') -Force -Global
 function Start-CorpusRestart {
     param([string]$Root,[switch]$SmokeTest)
     $signal=Join-Path $Root ('logs/restart-'+[guid]::NewGuid().ToString('N')+'.ready')
@@ -11,7 +12,7 @@ function Start-CorpusRestart {
     return [pscustomobject]@{Process=$process;SignalPath=$signal}
 }
 function Show-CorpusWindow {
-    param([string]$Root,[switch]$SkipDependencies,[switch]$SmokeTest,[string]$ScreenshotPath='',[switch]$SmokeCheckDependencies,[switch]$OpenDependencies)
+    param([string]$Root,[switch]$SkipDependencies,[switch]$SmokeTest,[string]$ScreenshotPath='',[switch]$SmokeCheckDependencies,[switch]$OpenDependencies,[switch]$SmokeCorpus)
     $appRoot=Split-Path $PSScriptRoot -Parent
     Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase
     [xml]$xaml=Get-Content (Join-Path $PSScriptRoot 'Corpus.Gui.xaml') -Raw -Encoding UTF8
@@ -23,8 +24,8 @@ function Show-CorpusWindow {
         $name=$node.GetAttribute('Name','http://schemas.microsoft.com/winfx/2006/xaml')
         $ui[$name]=$window.FindName($name)
     }
-    $state=@{Worker=$null;Handle=$null;Shared=$null;Operation='';Snapshot=$null;Ready=[bool]$SkipDependencies;Closing=$false;PendingSubject='';SmokeTicks=0;LastOutcome='Ready';CheckedStartup=(([bool]$SkipDependencies -or [bool]$SmokeTest) -and -not $SmokeCheckDependencies);RestartRequired=$false;RestartTicket=$null;DependencyRows=@()}
-    $mutators=@('CreateSubject','RenameSubject','AddChannel','RemoveChannel','SyncSelected','SyncAll','Refresh','CreateVideoSubject','ImportVideo','Build','Search','FilterCorpus','RefreshChannelTranscripts','RefreshVideoTranscript')
+    $state=@{Worker=$null;Handle=$null;Shared=$null;Operation='';Snapshot=$null;Ready=[bool]$SkipDependencies;Closing=$false;PendingSubject='';SmokeTicks=0;LastOutcome='Ready';CheckedStartup=(([bool]$SkipDependencies -or [bool]$SmokeTest) -and -not $SmokeCheckDependencies);RestartRequired=$false;RestartTicket=$null;DependencyRows=@();SmokeStage=0;ViewerVerified=$false;SmokeError=''}
+    $mutators=@('CreateSubject','RenameSubject','AddChannel','RemoveChannel','SyncSelected','SyncAll','Refresh','CreateVideoSubject','ImportVideo','Build','Search','FilterCorpus','RefreshChannelTranscripts','RefreshVideoTranscript','OpenTranscript','AutoExport')
     $ui.Paths.Text="Application and corpus root: $Root`nWorkbook: $(Join-Path $Root 'output/YouTubeCorpus.xlsx')`nSource configuration: $(Join-Path $Root 'config.json')`nNative dependencies: $(Get-CorpusNativeRoot)"
     $dependencySettings=Get-CorpusDependencySettings $Root
     $ui.DependencyChannel.SelectedIndex=if($dependencySettings.YtDlpChannel -eq 'nightly'){1}else{0}
@@ -44,6 +45,8 @@ function Show-CorpusWindow {
     }
     function Start-Work([string]$Operation,$Arguments=@{}) {
         if($state.Worker){return}
+        if($Operation -in @('SyncAll','SyncChannel','Video')){$Arguments.SkipWorkbook=(-not [bool]$ui.AutoExport.IsChecked)}
+        if($Operation -eq 'Search'){$state.SearchText=$Arguments.Text}
         $state.Operation=$Operation;$state.Shared=[hashtable]::Synchronized(@{Cancel=$false;CommitInProgress=$false;DependenciesChanged=$false;Progress=$null;Messages=[Collections.Concurrent.ConcurrentQueue[string]]::new()})
         $ps=[powershell]::Create()
         $null=$ps.AddScript({param($root,$op,$argsMap,$shared,$codeRoot)
@@ -61,8 +64,20 @@ function Show-CorpusWindow {
                     'RecoverDependencies' {return Repair-CorpusDependencies $ctx}
                 }
             }
-            if($op -eq 'Filter') {
-                @(Get-CorpusVideos $root | Where-Object { ($_.SubjectName+' '+$_.ChannelName+' '+$_.VideoTitle+' '+$_.VideoId+' '+$_.LastSyncStatus).IndexOf($argsMap.Text,[StringComparison]::OrdinalIgnoreCase) -ge 0 } | Select-Object SubjectName,ChannelName,VideoTitle,VideoId,PublishedDate,Duration,TranscriptAvailable,SubtitleSource,MetadataCapturedAt,VideoUrl)
+            if($op -eq 'Transcript') {
+                if($argsMap.VideoId -notmatch '^[A-Za-z0-9_-]{11}$'){throw 'Invalid video ID.'}
+                $video=Read-CorpusJson (Join-Path $root "data/normalized/videos/$($argsMap.VideoId).json")
+                if(-not $video){throw 'Video record is no longer available. Refresh the corpus.'}
+                [pscustomobject]@{Video=$video;Rows=@(Get-CorpusTranscript $root $video);Query=$argsMap.Query;SegmentId=$argsMap.SegmentId}
+            } elseif($op -eq 'Filter') {
+                @(Get-CorpusVideos $root | Where-Object {
+                    ($_.SubjectName+' '+$_.ChannelName+' '+$_.VideoTitle+' '+$_.VideoId+' '+$_.LastSyncStatus).IndexOf($argsMap.Text,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+                    (-not $argsMap.Subject -or $_.SubjectId -eq $argsMap.Subject) -and
+                    (-not $argsMap.Channel -or ($_.ChannelName+' '+$_.ChannelId).IndexOf($argsMap.Channel,[StringComparison]::OrdinalIgnoreCase) -ge 0) -and
+                    (-not $argsMap.Video -or ($_.VideoTitle+' '+$_.VideoId).IndexOf($argsMap.Video,[StringComparison]::OrdinalIgnoreCase) -ge 0) -and
+                    (-not $argsMap.From -or ($_.PublishedDate -and [datetime]$_.PublishedDate -ge [datetime]$argsMap.From)) -and
+                    (-not $argsMap.To -or ($_.PublishedDate -and [datetime]$_.PublishedDate -lt ([datetime]$argsMap.To).AddDays(1)))
+                } | Select-Object SubjectName,ChannelName,VideoTitle,VideoId,PublishedDate,Duration,TranscriptAvailable,SubtitleSource,LastSyncStatus,VideoUrl)
             } else {Invoke-CorpusOperation $root $op $argsMap $shared}
         }).AddArgument($Root).AddArgument($Operation).AddArgument($Arguments).AddArgument($state.Shared).AddArgument($appRoot)
         $state.Worker=$ps;$state.Handle=$ps.BeginInvoke();Set-Busy $true
@@ -87,7 +102,7 @@ function Show-CorpusWindow {
             else{[pscustomobject]@{Subject=$s.name;ChannelName='';ChannelId='';Url=$c.url;VideosDiscovered=0;WithTranscripts=0;WithoutTranscripts=0;LastSuccessfulSync='';LastAttempt=$(if($attempt.Count){$attempt[0].LastAttempt}else{''});Status=$(if($attempt.Count){$attempt[0].Status}else{'Not imported'})}}
         }})
         $ui.ChannelsGrid.ItemsSource=$channelRows
-        $ui.CorpusGrid.ItemsSource=@($Snapshot.Videos | Select-Object SubjectName,ChannelName,VideoTitle,VideoId,PublishedDate,Duration,TranscriptAvailable,SubtitleSource,MetadataCapturedAt,VideoUrl)
+        $ui.CorpusGrid.ItemsSource=@($Snapshot.Videos | Select-Object SubjectName,ChannelName,VideoTitle,VideoId,PublishedDate,Duration,TranscriptAvailable,SubtitleSource,LastSyncStatus,VideoUrl)
         Show-SubjectChannels
     }
     function Show-UiError($Message){$ui.Status.Text=$Message;$ui.LogText.AppendText("ERROR: $Message`r`n");[Windows.MessageBox]::Show($window,$Message,'YT-OSINT','OK','Warning') | Out-Null}
@@ -125,12 +140,22 @@ function Show-CorpusWindow {
     $ui.CreateVideoSubject.Add_Click({$state.PendingSubject=$ui.NewVideoSubject.Text.Trim();Start-Work 'Subject' @{Name=$state.PendingSubject;Id=''}})
     $ui.ImportVideo.Add_Click({try{$url=Assert-CorpusYouTubeUrl $ui.VideoUrl.Text.Trim();$s=$ui.VideoSubject.SelectedItem;Start-Work 'Video' @{Url=$url;RefreshTranscript=[bool]$ui.RefreshVideoTranscript.IsChecked;SubjectId=$(if($s){$s.id}else{''});SubjectName=$(if($s){$s.name}else{''})}}catch{Show-UiError $_.Exception.Message}})
     $ui.Build.Add_Click({Start-Work 'Build'})
-    $ui.FilterCorpus.Add_Click({Start-Work 'Filter' @{Text=$ui.CorpusFilter.Text}})
+    function Get-CorpusFilters {
+        $s=$ui.SearchSubject.SelectedItem
+        return @{Text=$ui.Query.Text;Subject=$(if($s){$s.id}else{''});Channel=$ui.SearchChannel.Text;Video=$ui.SearchVideo.Text;From=$(if($ui.DateFrom.SelectedDate){$ui.DateFrom.SelectedDate.ToString('yyyy-MM-dd')}else{''});To=$(if($ui.DateTo.SelectedDate){$ui.DateTo.SelectedDate.ToString('yyyy-MM-dd')}else{''})}
+    }
+    $ui.FilterCorpus.Add_Click({Start-Work 'Filter' (Get-CorpusFilters)})
     $ui.ClearSearchSubject.Add_Click({$ui.SearchSubject.SelectedIndex=-1})
-    $ui.Search.Add_Click({$s=$ui.SearchSubject.SelectedItem;Start-Work 'Search' @{Text=$ui.Query.Text;Subject=$(if($s){$s.id}else{''});Channel=$ui.SearchChannel.Text;Video=$ui.SearchVideo.Text;From=$(if($ui.DateFrom.SelectedDate){$ui.DateFrom.SelectedDate.ToString('yyyy-MM-dd')}else{''});To=$(if($ui.DateTo.SelectedDate){$ui.DateTo.SelectedDate.ToString('yyyy-MM-dd')}else{''})}})
-    $ui.SearchGrid.Add_SelectionChanged({if($ui.SearchGrid.SelectedItem){$ui.ContextText.Text=$ui.SearchGrid.SelectedItem.Context}})
-    $openResult={if($ui.SearchGrid.SelectedItem){Start-Process (Assert-CorpusYouTubeUrl $ui.SearchGrid.SelectedItem.TimestampUrl)}}
-    $ui.OpenResult.Add_Click($openResult);$ui.SearchGrid.Add_MouseDoubleClick($openResult)
+    $ui.Search.Add_Click({if([string]::IsNullOrWhiteSpace($ui.Query.Text)){Show-UiError 'Enter text to search the transcripts.';return};Start-Work 'Search' (Get-CorpusFilters)})
+    $readTranscript={
+        $isSearch=$ui.SearchGrid.Visibility -eq 'Visible'
+        $row=if($isSearch){$ui.SearchGrid.SelectedItem}else{$ui.CorpusGrid.SelectedItem}
+        if(-not $row){Show-UiError 'Select a video or transcript result first.';return}
+        Start-Work 'Transcript' @{VideoId=$row.VideoId;Query=$(if($isSearch){$state.SearchText}else{''});SegmentId=$(if($isSearch){$row.SegmentId}else{''})}
+    }
+    $ui.OpenTranscript.Add_Click($readTranscript)
+    $ui.CorpusGrid.Add_MouseDoubleClick($readTranscript);$ui.SearchGrid.Add_MouseDoubleClick($readTranscript)
+    $ui.OpenResult.Add_Click({try{if($ui.SearchGrid.Visibility -eq 'Visible' -and $ui.SearchGrid.SelectedItem){Start-Process (Assert-CorpusYouTubeUrl $ui.SearchGrid.SelectedItem.TimestampUrl)}elseif($ui.CorpusGrid.SelectedItem){Start-Process (Assert-CorpusYouTubeUrl $ui.CorpusGrid.SelectedItem.VideoUrl)}}catch{Show-UiError $_.Exception.Message}})
     $ui.OpenWorkbook.Add_Click({try{$path=Join-Path $Root 'output/YouTubeCorpus.xlsx';if(-not (Test-Path $path)){throw 'Build the workbook first.'};Start-Process $path}catch{Show-UiError $_.Exception.Message}})
     $ui.OpenLogs.Add_Click({Start-Process explorer.exe -ArgumentList ('"'+(Join-Path $Root 'logs')+'"')})
     $ui.OpenData.Add_Click({Start-Process explorer.exe -ArgumentList ('"'+(Join-Path $Root 'data')+'"')})
@@ -138,6 +163,15 @@ function Show-CorpusWindow {
     $ui.Cancel.Add_Click({if($state.Shared){$state.Shared.Cancel=$true;$ui.Cancel.IsEnabled=$false;$ui.Status.Text='Cancelling safely…'}})
     $timer=[Windows.Threading.DispatcherTimer]::new();$timer.Interval=[timespan]::FromMilliseconds(200)
     $timer.Add_Tick({
+        if($SmokeCorpus -and -not $state.Worker -and $state.Snapshot -and $state.SmokeStage -lt 3){
+            try {
+                switch($state.SmokeStage){
+                    0 {$ui.Query.Text='test';$ui.FilterCorpus.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent));$state.SmokeStage=1}
+                    1 {if($ui.CorpusGrid.Items.Count -ne 1){throw 'Corpus metadata filter failed.'};$ui.Search.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent));$state.SmokeStage=2}
+                    2 {if($ui.SearchGrid.Items.Count -ne 2 -or $ui.SearchGrid.Visibility -ne 'Visible'){throw 'Integrated transcript search failed.'};$ui.SearchGrid.SelectedIndex=0;$ui.OpenTranscript.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent));$state.SmokeStage=3}
+                }
+            }catch{$state.SmokeError=$_.Exception.Message;$window.Close()}
+        }
         if($SmokeTest){$state.SmokeTicks++;if($state.SmokeTicks -gt 15 -and -not $state.Worker){
             if($ScreenshotPath){
                 $bitmap=[Windows.Media.Imaging.RenderTargetBitmap]::new([int]$window.ActualWidth,[int]$window.ActualHeight,96,96,[Windows.Media.PixelFormats]::Pbgra32)
@@ -156,7 +190,7 @@ function Show-CorpusWindow {
         if($p){$ui.Status.Text="$($p.Stage) | $($p.Item)";$ui.Progress.IsIndeterminate=($p.Total -le 0);if($p.Total -gt 0){$ui.Progress.Maximum=$p.Total;$ui.Progress.Value=$p.Current;$ui.Status.Text+=" | $($p.Current) of $($p.Total)"}}
         if($state.Operation -eq 'Bootstrap'){$path=Join-Path $Root 'logs/bootstrap-progress.txt';if(Test-Path $path){try{$ui.Status.Text=[IO.File]::ReadAllText($path)}catch{}}}
         if($state.Handle.IsCompleted){
-            $op=$state.Operation;$failed=$false
+            $op=$state.Operation;$failed=$false;$viewerData=$null
             try{$result=@($state.Worker.EndInvoke($state.Handle));if($state.Worker.HadErrors){throw $state.Worker.Streams.Error[0].Exception.Message}
                 switch($op){
                     'Bootstrap' {$state.Ready=$true;$ui.Status.Text='Ready'}
@@ -164,25 +198,28 @@ function Show-CorpusWindow {
                     'UpdateDependencies' {$ui.Status.Text='Updates complete. Restarting YT-OSINT…'}
                     'RecoverDependencies' {$ui.Status.Text='Recovery complete. Restarting YT-OSINT…'}
                     'Refresh' {if($result.Count){Set-Snapshot $result[-1]}}
-                    'Search' {$ui.SearchGrid.ItemsSource=@($result | Select-Object SubjectName,ChannelName,VideoTitle,PublishedDate,TranscriptText,TimestampDisplay,Context,TimestampUrl);$ui.Status.Text="$($result.Count) matches"}
-                    'Filter' {$ui.CorpusGrid.ItemsSource=$result}
-                    default {if($result.Count -and $result[-1].PSObject.Properties['FinalState']){$ui.Status.Text="$($result[-1].FinalState): $($result[-1].VideosDiscovered) discovered; $($result[-1].TranscriptsAdded) transcripts added; $($result[-1].TranscriptsUnavailable) unavailable; $($result[-1].Failures) failures"}}
+                    'Search' {$ui.SearchGrid.ItemsSource=$result;$ui.CorpusGrid.Visibility='Collapsed';$ui.SearchGrid.Visibility='Visible';$ui.CorpusNotice.Text="$($result.Count) matching segments. Double-click a result to read its transcript.";$ui.Status.Text="$($result.Count) matches"}
+                    'Transcript' {if($result.Count){$viewerData=$result[-1]}}
+                    'Filter' {$ui.CorpusGrid.ItemsSource=$result;$ui.CorpusGrid.Visibility='Visible';$ui.SearchGrid.Visibility='Collapsed';$ui.CorpusNotice.Text="$($result.Count) videos. Double-click a row to read its transcript."}
+                    default {if($result.Count -and $result[-1].PSObject.Properties['FinalState']){$ui.Status.Text="$($result[-1].FinalState): $($result[-1].VideosDiscovered) discovered; $($result[-1].TranscriptsAdded) transcripts added; $($result[-1].TranscriptsUnavailable) unavailable; $($result[-1].Failures) failures; $(Get-CorpusProperty $result[-1] MembersOnlySkipped 0) members-only skipped"}}
                 }
             }catch{$failed=$true;$state.WorkerError=$_.Exception.GetBaseException().Message;$ui.Status.Text=if($state.Shared.Cancel){'Cancelled; completed work preserved.'}elseif(Test-CorpusRateLimitError $_.Exception){'YouTube rate limit - sync stopped. Wait at least 8 minutes before retrying.'}else{'Operation failed; see Logs / Status.'};$ui.LogText.AppendText($_.Exception.GetBaseException().Message+"`r`n")}
             finally{if($op -in @('UpdateDependencies','RecoverDependencies')){$state.RestartRequired=(-not $failed -or [bool]$state.Shared.DependenciesChanged);$ui.DependencyNotice.Text=if($failed){'Update did not complete. See Logs / Status for details.'}else{'Updates complete. Restarting YT-OSINT…'}};if($op -ne 'Refresh'){$state.LastOutcome=$ui.Status.Text};$state.Worker.Dispose();$state.Worker=$null;$state.Handle=$null;$ui.Progress.IsIndeterminate=$false;$ui.Progress.Value=0;Set-Busy $false}
             if($state.Closing){$window.Close();return}
+            if($viewerData){try{Show-CorpusTranscriptWindow -Owner $window -Video $viewerData.Video -Rows $viewerData.Rows -Query $viewerData.Query -SegmentId $viewerData.SegmentId -SmokeTest:$SmokeCorpus | Out-Null;if($SmokeCorpus){$state.ViewerVerified=$true}}catch{if($SmokeCorpus){$state.SmokeError=$_.Exception.Message;$window.Close()}else{Show-UiError $_.Exception.Message}}}
             if($op -eq 'Bootstrap' -and $failed){$ui.LogText.AppendText("Use Settings > Dependencies to check or recover dependencies, then restart.`r`n");Start-Work 'CheckDependencies' @{Channel=(Get-DependencyChannel);Force=$false}}
             elseif($op -in @('UpdateDependencies','RecoverDependencies')){if(-not $failed){Restart-Application}else{Show-UiError $state.WorkerError}}
-            elseif($op -notin @('Refresh','Search','Filter','CheckDependencies')){Start-Work 'Refresh'}
+            elseif($op -notin @('Refresh','Search','Filter','Transcript','CheckDependencies')){Start-Work 'Refresh'}
             elseif($op -eq 'Refresh'){$ui.Status.Text=$state.LastOutcome;if(-not $state.CheckedStartup){$state.CheckedStartup=$true;Start-Work 'CheckDependencies' @{Channel=(Get-DependencyChannel);Force=$false}}}
         }
     })
     $window.Add_Closing({param($sender,$e) if($state.Worker){$e.Cancel=$true;$state.Closing=$true;if($state.Operation -ne 'Bootstrap'){$state.Shared.Cancel=$true};$ui.Status.Text='Finishing safely before closing…'}})
-    $window.Add_ContentRendered({if($SmokeCheckDependencies -or $OpenDependencies){$ui.Tabs.SelectedIndex=6};if($SkipDependencies){Start-Work 'Refresh'}else{Start-Work 'Bootstrap'};$timer.Start()})
+    $window.Add_ContentRendered({if($SmokeCheckDependencies -or $OpenDependencies){$ui.SettingsTab.IsSelected=$true};if($SkipDependencies){Start-Work 'Refresh'}else{Start-Work 'Bootstrap'};$timer.Start()})
     Set-Busy $true
     try{
         $null=$window.ShowDialog()
         if($SmokeTest){
+            if($SmokeCorpus -and (-not $state.ViewerVerified -or $state.SmokeError)){throw "Corpus workflow verification failed: $($state.SmokeError)"}
             if(-not $state.Ready -or -not $state.Snapshot){throw 'GUI smoke test failed: background initialization did not complete.'}
             if($SmokeCheckDependencies -and $state.DependencyRows.Count -ne 4){throw 'Dependency page did not receive all four background check results.'}
             [pscustomobject]@{Ready=$state.Ready;Subjects=$state.Snapshot.Config.subjects.Count;DispatcherTicks=$state.SmokeTicks;WorkerIdle=($null -eq $state.Worker);Dependencies=$state.DependencyRows.Count}

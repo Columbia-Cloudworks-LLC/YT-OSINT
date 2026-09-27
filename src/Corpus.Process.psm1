@@ -1,7 +1,11 @@
 ﻿Set-StrictMode -Version 2
 if(-not ('YouTubeCorpus.ProcessRunner' -as [type])) { Add-Type -Path (Join-Path $PSScriptRoot 'Corpus.Process.cs') }
+function Test-CorpusMembersOnlyMessage {
+    param([string]$Message)
+    return $Message -match "(?i)(Join this channel to get access to members-only content|This video is available to this channel's members(?: on level| only|\.|$)|This video is only available (?:to|for) (?:channel )?members)"
+}
 function Invoke-CorpusProcess {
-    param($Context,[string]$Executable,[string[]]$Arguments,[int]$TimeoutSeconds=300,[switch]$Quiet,[switch]$StopOnRateLimit)
+    param($Context,[string]$Executable,[string[]]$Arguments,[int]$TimeoutSeconds=300,[switch]$Quiet,[switch]$StopOnRateLimit,[switch]$AllowMembersOnly)
     $runner=[YouTubeCorpus.ProcessRunner]::new(); $watch=[Diagnostics.Stopwatch]::StartNew()
     # Never log full URLs/arguments: caption URLs can contain signed tokens.
     Write-CorpusLog $Context Info Process ([IO.Path]::GetFileName($Executable)) "Starting $([IO.Path]::GetFileName($Executable)) ($($Arguments.Count) arguments)."
@@ -22,8 +26,13 @@ function Invoke-CorpusProcess {
         }
         $runner.Process.WaitForExit()
         $result=[pscustomobject]@{StdOut=$runner.Output;StdErr=$runner.Error;ExitCode=$runner.Process.ExitCode}
+        if($AllowMembersOnly -and $result.ExitCode -ne 0 -and (Test-CorpusMembersOnlyMessage $result.StdErr)){
+            $result | Add-Member NoteProperty MembersOnly $true
+            Write-CorpusLog $Context Info Process '' 'Members-only video; skipping.'
+            return $result
+        }
         if($result.StdErr) { Write-CorpusLog $Context $(if($result.ExitCode){'Error'}else{'Warning'}) Process '' ($result.StdErr -replace 'https?://\S+','[URL]') }
         return $result
     } finally { $runner.Dispose() }
 }
-Export-ModuleMember -Function Invoke-CorpusProcess
+Export-ModuleMember -Function Invoke-CorpusProcess,Test-CorpusMembersOnlyMessage

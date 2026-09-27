@@ -30,3 +30,6 @@ jobs:
       - name: Test offline fixtures
         shell: powershell
         run: .\tests\Run-Tests.ps1
+      - name: Exercise WPF transcript viewer and corpus search
+        shell: powershell
+        run: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-ViewerIntegration.ps1

@@ -2,9 +2,7 @@
 
 A Windows-native PowerShell/WPF utility for collecting YouTube metadata and English transcripts into a local, searchable evidence corpus. Export a real Excel workbook, search neighboring transcript context, and open a video at the matching timestamp. No Excel installation, API key, web server, Python runtime, or database is required.
 
-**Validation status:** deterministic fixture tests and Windows WPF startup have been exercised. Live tests against both seeded channels were attempted with the machine's preserved yt-dlp 2025.01.26; those historical YouTube extraction attempts failed. A successful full-channel transcript capture has **not** been demonstrated. See [validation details](docs/VALIDATION.md).
-
-![Actual WPF application](docs/screenshot.png)
+**Validation status:** Windows fixture tests, the WPF transcript viewer, and Corpus search have been exercised. The captured corpus contains 113 video records and 18,951 transcript segments; the corrected workbook opens in desktop Excel with all four tables intact. See [validation details](docs/VALIDATION.md).
 
 ## First launch
 
@@ -61,7 +59,7 @@ Command-line equivalents (run from the repository):
 .\Update-Dependencies.ps1 -Action Recover
 ```
 
-The CLI Update action is itself the explicit update request. Native commits elevate only after download/staging; ImportExcel stays unelevated. Pester is a development dependency pinned to supported major versions, and Windows PowerShell/.NET remain under Windows servicing.
+The CLI Update action is itself the explicit update request. Native tools and ImportExcel are updated without elevation. Pester is a development dependency pinned to supported major versions, and Windows PowerShell/.NET remain under Windows servicing.
 
 ## Subtitle pacing and rate limits
 
@@ -80,10 +78,13 @@ Cooldown deadlines and retry counts are saved in `%LOCALAPPDATA%\YT-OSINT\youtub
 1. **Subjects:** select a subject, enter its display name, and rename it, or create another subject. Add channel URLs under the selected subject. Select an association to remove it; previously captured videos, observations, and transcripts remain.
 2. **Channels:** select a configured source and sync it, or sync all sources. The table shows stable IDs, counts, last attempt, last successful sync, and status. URLs resolving to the same channel ID share canonical channel state. Conflicting subject ownership is rejected while the prior association is active.
 3. **Individual Videos:** paste a watch, short, or live video URL. Choose an existing subject, create/select a new subject, or leave it unassigned. Reimporting an already assigned video without choosing a subject preserves its existing assignment.
-4. **Corpus:** inspect and sort video metadata. Enter a subject, channel, title, ID, or status fragment and press Filter. Build Excel regenerates the workbook from local canonical files. Open workbook uses the registered Windows application.
-5. **Search:** enter literal transcript text, optionally restrict subject/channel/video and an inclusive publication-date range. Select a result to see the preceding, matching, and following segment. Double-click or press Open at timestamp to launch the browser.
-6. **Logs / Status:** inspect progress, final counts, warnings, and errors; open the structured per-run log directory.
-7. **Settings → Dependencies:** check releases, review installed paths and providers, choose stable/nightly for yt-dlp, select updates, or recover an interrupted update. **Settings → Storage:** inspect paths and open data/configuration. Source relationships are normally managed in Subjects. If editing JSON externally, wait until the application is idle, preserve stable IDs, and press Refresh.
+4. **Corpus:** use **Find videos** to filter metadata or **Find in transcripts** to search captions, with optional subject/channel/video/date filters. Both use the same literal query field. Double-click a video or search result, or select it and press **Read transcript**. There is no separate Search tab.
+5. **Transcript viewer:** read the full timestamped transcript. Type literal text to highlight every occurrence within each segment, ignoring case. **Previous match** and **Next match** navigate matching segments and wrap around; **Show matching segments only** hides other rows. Clear the query to restore the full transcript. Double-click a segment or use **Open selected timestamp** to open YouTube. Missing transcripts show an empty-state message. The viewer renders visible rows on demand, and loads only the selected video's saved transcript.
+6. **Excel export:** GUI imports save the corpus without rebuilding Excel by default. Use **Export Excel workbook** when needed, or enable **Also export Excel after imports** for the current session. CLI imports retain automatic export. Excel is an optional view of the canonical JSON files.
+7. **Logs / Status:** inspect progress, counts, warnings, and errors; open the structured per-run log directory.
+8. **Settings → Dependencies:** check releases, review installed paths and providers, select updates, or recover an interrupted update. **Settings → Storage:** inspect paths and open data/configuration.
+
+Members-only videos are recorded as **SkippedMembersOnly**, counted separately, and excluded from failure totals. Channel listings identify them before video requests; explicit membership errors during metadata retrieval also become skips. Existing transcripts are preserved. Known member skips are reused unless explicitly refreshed or a subsequent channel listing reports public/unlisted access. Other errors, including private videos and rate limits, retain their existing handling.
 
 Long-running work executes in a background PowerShell runspace. WPF's dispatcher timer only transfers status and completed results. External processes use asynchronous stdout/stderr readers implemented in a small C# helper loaded by PowerShell. They create no console windows and use Windows-compatible structured argument quoting. Native command logs redact URLs and do not emit signed caption URLs.
 
@@ -108,6 +109,7 @@ src/Corpus.Dependencies.psm1  Release checks, caching, staging, module updates
 src/Corpus.DependencyTransaction.psm1  Native pair commit, backup, rollback/recovery
 src/Corpus.Process.*          Native execution and async output capture
 src/Corpus.Gui.*              WPF layout and background-worker coordination
+src/Corpus.Viewer.*           Virtualized transcript reader and literal highlighting
 src/Corpus.Logging.psm1       JSONL logs and progress notifications
 data/raw/CHANNEL/VIDEO/       Content-addressed original metadata and subtitles
 data/normalized/videos/      One canonical document per video ID

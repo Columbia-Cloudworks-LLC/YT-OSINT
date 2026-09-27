@@ -13,8 +13,8 @@ function Export-CorpusWorkbook {
         $definitions=@{
             Videos=@('Subject','Subject ID','Channel','Channel ID','Video Title','Video ID','Published Date','Duration','Video URL','Description','View Count','Like Count','Subtitle Source','Transcript Available','Metadata Captured At','Transcript Captured At','Last Sync Status')
             Transcript=@('Subject','Channel','Published Date','Video Title','Video ID','Timestamp','Start Seconds','Transcript Text','Timestamp URL','Transcript Source','Captured At')
-            Channels=@('Subject','Channel Name','YouTube Channel ID','Handle','URL','First Captured','Last Sync','Video Count','Transcript Count','Transcript Failures','Last Attempt','Status')
-            Runs=@('RunId','StartTimestamp','EndTimestamp','Machine','WindowsVersion','PowerShellVersion','YtDlpVersion','FFmpegVersion','ImportExcelVersion','ChannelsRequested','VideosDiscovered','VideosAdded','VideosAlreadyKnown','TranscriptsAdded','TranscriptsUnavailable','Failures','FinalState')
+            Channels=@('Subject','Channel Name','YouTube Channel ID','Handle','URL','First Captured','Last Sync','Video Count','Transcript Count','Transcript Failures','Last Attempt','Status','Members-only Skipped')
+            Runs=@('RunId','StartTimestamp','EndTimestamp','Machine','WindowsVersion','PowerShellVersion','YtDlpVersion','FFmpegVersion','ImportExcelVersion','ChannelsRequested','VideosDiscovered','VideosAdded','VideosAlreadyKnown','TranscriptsAdded','TranscriptsUnavailable','Failures','FinalState','MembersOnlySkipped')
         }
         function New-Sheet($Name,$Headers) {
             $sheet=$package.Workbook.Worksheets.Add($Name)
@@ -52,7 +52,7 @@ function Export-CorpusWorkbook {
         $ws=New-Sheet 'Channels' $definitions.Channels; $row=1
         foreach($file in Get-ChildItem (Join-Path $Context.Root 'data/normalized/channels') -Filter '*.json') {
             Test-CorpusCancellation $Context; $ch=Read-CorpusJson $file.FullName; $row++
-            $values=@($ch.Subject,$ch.ChannelName,$ch.ChannelId,$ch.Handle,$ch.Url,$ch.FirstCaptured,$ch.LastSync,$ch.VideosDiscovered,$ch.TranscriptCount,$ch.Failures,$ch.LastAttempt,$ch.Status)
+            $values=@($ch.Subject,$ch.ChannelName,$ch.ChannelId,$ch.Handle,$ch.Url,$ch.FirstCaptured,$ch.LastSync,$ch.VideosDiscovered,$ch.TranscriptCount,$ch.Failures,$ch.LastAttempt,$ch.Status,(Get-CorpusProperty $ch MembersOnlySkipped 0))
             for($c=1;$c -le $values.Count;$c++){Set-Cell $ws $row $c $values[$c-1] -Date:($c -in @(6,7,11)) -Link:($c -eq 5)}
         }
         $ws=New-Sheet 'Runs' $definitions.Runs; $row=1
@@ -63,9 +63,9 @@ function Export-CorpusWorkbook {
         foreach($sheet in $package.Workbook.Worksheets) {
             Set-CorpusProgress $Context 'Excel: formatting' $sheet.Name
             $sheet.Cells[1,1,1,$sheet.Dimension.End.Column].Style.Font.Bold=$true
-            $sheet.Cells[1,1,$sheet.Dimension.End.Row,$sheet.Dimension.End.Column].AutoFilter=$true
             $sheet.Cells.Style.VerticalAlignment=[OfficeOpenXml.Style.ExcelVerticalAlignment]::Top
             if($sheet.Dimension.End.Row -gt 1){$table=$sheet.Tables.Add($sheet.Dimension,('Corpus'+$sheet.Name));$table.TableStyle=[OfficeOpenXml.Table.TableStyles]::Medium2}
+            else {$sheet.Cells[1,1,1,$sheet.Dimension.End.Column].AutoFilter=$true}
             for($c=1;$c -le $sheet.Dimension.End.Column;$c++){
                 $header=[string]$sheet.Cells[1,$c].Value; $sheet.Column($c).Width=24
                 if($header -match 'Text|Description|Title'){$sheet.Column($c).Width=65;$sheet.Column($c).Style.WrapText=$true}

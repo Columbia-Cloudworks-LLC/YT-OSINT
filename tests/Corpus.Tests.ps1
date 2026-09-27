@@ -144,6 +144,13 @@ Describe 'Excel fixture export' {
             $sheet.Cells[2,9].Hyperlink.AbsoluteUri | Should Be 'https://www.youtube.com/watch?v=abcDEF12_-3&t=1s'
             $sheet.Cells[2,3].Value.GetType().Name | Should Be Double
             $sheet.Tables.Count | Should Be 1
+            foreach($ws in $pkg.Workbook.Worksheets){
+                $filters=@($ws.WorksheetXml.SelectNodes("/*[local-name()='worksheet']/*[local-name()='autoFilter']"))
+                if($ws.Tables.Count){
+                    $filters.Count | Should Be 0
+                    $ws.Tables[0].ShowFilter | Should Be $true
+                } else {$filters.Count | Should Be 1}
+            }
             $pkg.Workbook.Worksheets['Videos'].Cells[2,10].Formula | Should BeNullOrEmpty
         }finally{$pkg.Dispose()}
         $null=Export-CorpusWorkbook $ctx
@@ -235,5 +242,27 @@ Describe 'Run accounting and cancellation' {
         $run.FinalState | Should Be Success
         $records=@(Import-Excel (Join-Path $root output/YouTubeCorpus.xlsx) -WorksheetName Runs)
         $records.Count | Should Be 1;$records[0].FinalState | Should Be Success
+    }
+}
+
+Describe 'Optional workbook exports' {
+    BeforeEach {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $ctx=New-CorpusContext $root
+        Copy-Item (Join-Path $project config.json) (Join-Path $root config.json)
+        Mock Invoke-CorpusProcess -ModuleName Corpus.Operations {[pscustomobject]@{ExitCode=0;StdOut='fixture';StdErr=''}}
+        Mock Import-CorpusVideo -ModuleName Corpus.Operations {}
+        Mock Export-CorpusWorkbook -ModuleName Corpus.Operations {}
+    }
+    It 'finishes an import without exporting when the GUI opts out' {
+        $run=Invoke-CorpusOperation $root Video @{Url='https://youtu.be/abcDEF12_-3';SubjectId='';SubjectName='';SkipWorkbook=$true}
+        $run.FinalState | Should Be Success
+        Assert-MockCalled Export-CorpusWorkbook -ModuleName Corpus.Operations -Times 0 -Exactly -Scope It
+        (Read-CorpusJson (Join-Path $root "data/normalized/runs/$($run.RunId).json")).FinalState | Should Be Success
+    }
+    It 'retains CLI default export and honors an explicit Build' {
+        $null=Invoke-CorpusOperation $root Video @{Url='https://youtu.be/abcDEF12_-3';SubjectId='';SubjectName=''}
+        $null=Invoke-CorpusOperation $root Build @{SkipWorkbook=$true}
+        Assert-MockCalled Export-CorpusWorkbook -ModuleName Corpus.Operations -Times 2 -Exactly -Scope It
     }
 }

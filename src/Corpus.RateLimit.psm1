@@ -48,7 +48,7 @@ function Invoke-CorpusYouTubeProcess {
         # Persist a start reservation as well, so cancellation/restarts cannot bypass spacing.
         $state.NextRequestAt=(Get-CorpusRequestTime).AddSeconds(10).ToString('o')
         Write-CorpusJson (Get-CorpusRequestStatePath) $state
-        $result=Invoke-CorpusProcess $Context (Join-Path (Get-CorpusNativeRoot) 'yt-dlp.exe') $Arguments -TimeoutSeconds $TimeoutSeconds -Quiet:$Quiet -StopOnRateLimit
+        $result=Invoke-CorpusProcess $Context (Join-Path (Get-CorpusNativeRoot) 'yt-dlp.exe') $Arguments -TimeoutSeconds $TimeoutSeconds -Quiet:$Quiet -StopOnRateLimit -AllowMembersOnly:($Kind -eq 'Metadata')
         $state.NextRequestAt=(Get-CorpusRequestTime).AddSeconds(10).ToString('o')
         $limited=([bool](Get-CorpusProperty $result RateLimited $false) -or $result.StdErr -match '(?i)HTTP(?: Error| error| status(?: code)?)?[: ]+429\b|\b429:\s*Too Many Requests')
         if(-not $limited){

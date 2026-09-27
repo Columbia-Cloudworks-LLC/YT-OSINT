@@ -1,3 +1,15 @@
+# Current validation: corpus viewer and workbook repair
+
+- The regression suite covers members-only listing skips, explicit native membership errors, saved transcript preservation, ordinary failures, workbook filter XML, and optional GUI workbook export.
+- `tests/Invoke-ViewerIntegration.ps1` runs actual WPF windows in an STA PowerShell process. It verifies literal punctuation and Unicode, repeated highlights, clearing/recycling text, empty/no-match results, debounced search, next/previous navigation, filtering, and virtualization with 5,003 segments. It also drives the main Corpus window through metadata filtering, background transcript search, and opening the selected result's viewer.
+- The existing local capture contains 113 videos and 18,951 transcript segments. Thirty-four member-video failure records were backed up and reclassified using saved channel listings. Historical run logs remain unchanged. No new YouTube requests were needed.
+- Excel previously rejected the original workbook. The exporter assigned both worksheet and table AutoFilters to the same range. It now uses only the table filter when a table exists, and keeps a worksheet filter for header-only sheets. A rebuilt copy opens through desktop Excel's normal open operation with all four tables retained; `tests/Invoke-ExcelIntegration.ps1` provides this optional local check (requires Excel).
+- Transcript reads and corpus searches run in a background worker. Caption data remains in per-video JSON files; Excel exports are opt-in for GUI imports. Searches still scan local files rather than a database index. A multi-dozen-channel throughput benchmark and a complete manual accessibility review have not been performed.
+
+The earlier validation record below documents the original implementation and historical environment; it does not describe the current dependency policy or current capture results.
+
+---
+
 # Validation report
 
 Validated on 2026-09-26. This report distinguishes deterministic application checks from network-dependent acceptance.
