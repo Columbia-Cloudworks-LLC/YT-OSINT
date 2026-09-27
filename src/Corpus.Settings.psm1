@@ -20,7 +20,8 @@ function Get-CorpusChannelIndicator {
     if($Job){
         $locked=$Job.Status -in @('Pending','Discovering','Downloading','Cancelling')
         if($locked){
-            $running=@($Queue.Items | Where-Object {$Job.Id -in $_.JobIds -and $_.Status -eq 'Running'}).Count -gt 0
+            $view=Get-CorpusProperty $Queue ViewCounts $null
+            $running=if($view){$view.Job($Job.Id).Running -gt 0}else{@($Queue.Items | Where-Object {$Job.Id -in $_.JobIds -and $_.Status -eq 'Running'}).Count -gt 0}
             $activity=if($Job.Status -eq 'Cancelling'){'Cancelling'}elseif($Job.Status -eq 'Discovering' -or $running){'Syncing'}elseif($Queue.Paused){'Paused'}else{'Queued'}
             if(Get-CorpusProperty $Job PartialImport $false){$activity+=' · Partial channel import'}
             $symbol=if($activity -like 'Syncing*'){'↻'}else{'◷'}

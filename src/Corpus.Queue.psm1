@@ -32,10 +32,10 @@ function Initialize-CorpusQueue {
     try {
         $lock=Enter-CorpusConfigLock $Root
         try {
-            $queue=Get-CorpusQueue $Root;$queue.Paused=$true
-            foreach($job in $queue.SyncJobs){if($job.Status -eq 'Discovering'){$job.Status='Pending'}}
-            foreach($item in $queue.Items){if($item.Status -eq 'Running'){$item.Status='Pending';$item.Detail='Interrupted. Resume to continue using saved work.';$item.FinishedAt=$null}}
-            Save-CorpusQueue $Root $queue
+            $queue=Get-CorpusQueue $Root;$changed=(-not $queue.Paused -or -not (Test-Path (Join-Path $Root 'data/queue.json')));$queue.Paused=$true
+            foreach($job in $queue.SyncJobs){if($job.Status -eq 'Discovering'){$job.Status='Pending';$changed=$true}}
+            foreach($item in $queue.Items){if($item.Status -eq 'Running'){$item.Status='Pending';$item.Detail='Interrupted. Resume to continue using saved work.';$item.FinishedAt=$null;$changed=$true}}
+            if($changed){Save-CorpusQueue $Root $queue}
             return $queue
         } finally {$lock.Dispose()}
     } finally {$runner.Dispose()}
@@ -88,7 +88,8 @@ function Remove-CorpusQueueItems {
     $lock=Enter-CorpusConfigLock $Root
     try {
         $queue=Get-CorpusQueue $Root;$removed=0;$skipped=0
-        $selected=@{};foreach($id in @($Ids | Select-Object -Unique)){if($id){$selected[$id]=$true}}
+        # The ID set already deduplicates the batch; avoid Select-Object -Unique's extra work.
+        $selected=@{};foreach($id in $Ids){if($id){$selected[$id]=$true}}
         $drop=@{};$jobsById=@{};foreach($job in $queue.SyncJobs){$jobsById[$job.Id]=$job}
         $skipped=$selected.Count
         foreach($item in $queue.Items){
@@ -310,15 +311,15 @@ function Get-CorpusQueueItemIndicator {
     }
 }
 function Get-CorpusQueueProgress {
-    param($Queue)
+    param($Queue,$Counts=$null)
     $discoveryIds=@(Get-CorpusProperty $Queue DiscoveryJobIds @())
     $jobs=@($Queue.SyncJobs | Where-Object {$_.Id -in $discoveryIds -or $_.Status -in @('Pending','Discovering','Downloading','Cancelling')})
     $waiting=@($jobs | Where-Object Status -in @('Pending','Discovering')).Count
     $discovered=$jobs.Count-$waiting
-    $pending=@($Queue.Items | Where-Object Status -eq Pending).Count
-    $running=@($Queue.Items | Where-Object Status -eq Running).Count
+    $pending=if($Counts){$Counts.Pending}else{@($Queue.Items | Where-Object Status -eq Pending).Count}
+    $running=if($Counts){$Counts.Running}else{@($Queue.Items | Where-Object Status -eq Running).Count}
     $finished=$Queue.Items.Count-$pending-$running
-    $failures=@($Queue.Items | Where-Object Status -eq Failed).Count
+    $failures=if($Counts){$Counts.Failed}else{@($Queue.Items | Where-Object Status -eq Failed).Count}
     $discoveryFailures=@($jobs | Where-Object Status -eq Failed).Count
     if($waiting){
         $phase=if($running){'Finishing current video before discovery'}elseif($Queue.Paused -and @($jobs | Where-Object Status -eq Discovering).Count){'Pausing discovery'}elseif($Queue.Paused){'Discovery paused'}else{'Discovering channels'}

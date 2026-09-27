@@ -5,6 +5,10 @@ param(
     [int]$Limit=0, [switch]$RefreshTranscript, [switch]$SkipDependencies, [switch]$SmokeTest, [switch]$OpenDependencies, [string]$RestartSignal=''
 )
 $ErrorActionPreference='Stop'
+if($Action -eq 'Gui' -and $env:COMPlus_gcConcurrent -ne '1'){
+    . (Join-Path $PSScriptRoot 'src/Corpus.GuiHost.ps1')
+    exit (Invoke-CorpusGuiHost -ScriptPath $PSCommandPath -Parameters $PSBoundParameters)
+}
 $explicitRoot=[bool]$Root
 if(-not $Root){ $Root=Split-Path -Parent $MyInvocation.MyCommand.Path }
 Set-StrictMode -Version 2

@@ -12,9 +12,10 @@ powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-Subj
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-UnifiedQueueIntegration.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-SelectionStorageIntegration.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-DiscoveryQueueIntegration.ps1
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-QueuePerformanceIntegration.ps1
 ```
 
-GitHub Actions runs syntax parsing, the fixture suite, and all six WPF scripts on Windows. Tests use `tests/fixtures/config.json`, not the user's live subject configuration. No YouTube requests are made by these checks.
+GitHub Actions runs syntax parsing, the fixture suite, and all seven WPF scripts on Windows (the performance script uses 12,000 rows in CI). Tests use `tests/fixtures/config.json`, not the user's live subject configuration. No YouTube requests are made by these checks.
 
 The fixture suite covers configuration and identity, atomic writes, concurrent subject updates, VTT normalization, subtitle selection, cached transcript reuse, searches, timestamp links, acquisition failures, members-only skips, Excel structure, run accounting, persistent rate-limit scheduling, dependency verification, rollback/recovery, and maintenance locks.
 
@@ -53,12 +54,30 @@ Do not run integrations that own dependency locks concurrently.
 
 ## Remaining manual checks
 
-- Large multi-channel or multi-thousand-video queue throughput and memory profiling.
+- Long-running multi-channel throughput and memory profiling with representative discovery payloads and captured corpus data.
 - Interactive browser playback at timestamp links and a complete accessibility review.
 - Clean-machine dependency setup across supported Windows versions and organization policies.
 - Disk exhaustion and process/power-loss injection at every persistence boundary.
 
 Local searches scan per-video JSON; there is no database index. Viewer rows are virtualized, but metadata lists, search results, queue history, and Excel exports still use memory proportional to their contents. Clear finished queue history and narrow searches when appropriate.
+
+## Large-queue responsiveness
+
+`Invoke-QueuePerformanceIntegration.ps1` defaults to isolated 12,000-, 50,000-, and 100,000-row fixtures, using the same background-GC host configuration as the app launcher. It drives the actual WPF window through background loading, scrolling, programmatic text edits, sorting, a one-row background update, history clearing with 1,001 selected pending rows, removal of 3,000–5,000 selected pending rows in one command, a simulated active download and pause. It checks row/collection identity, selection and sort retention, actual container virtualization, cached counts, host GC-policy restoration and absence of unrelated corpus refreshes. JSON persistence, locks and scheduler behavior are real; acquisition alone is simulated. Run integrations sequentially.
+
+An Input-priority dispatcher probe samples every 20 ms, reporting additional scheduling delay, with a 95th-percentile budget of 100 ms and maximum of 1,000 ms. This detects stalls, but is not a hardware-independent guarantee of keyboard or mouse latency. Sort time and maximum collection-application slice time are reported separately. Machine load, WPF layout, garbage collection and storage affect timings. Results are saved to ignored `work/queue-performance-results.json`.
+
+`QueueView.Tests.ps1` also checks header sorting and selection retention, incremental notifications/identity, nonadjacent removals, additions, empty queues, cached counts, yielding during large batches, and a single collection change for bulk removal. Snapshots and persistence still require work proportional to queue size; the UI no longer performs queue parsing or full row reconstruction on each update.
+
+Local Windows PowerShell 5.1 results on 2026-09-27 (synthetic fixtures, one complete run):
+
+| Queue rows | Pending rows removed together | P95 extra dispatcher delay | Maximum extra delay | Column sort |
+| ---: | ---: | ---: | ---: | ---: |
+| 12,000 | 3,000 | 29.6 ms | 231.0 ms | 62.4 ms |
+| 50,000 | 5,000 | 29.0 ms | 237.9 ms | 174.8 ms |
+| 100,000 | 5,000 | 34.9 ms | 321.5 ms | 244.5 ms |
+
+All three passed the stated budgets, including preservation of 1,001 selected rows during bulk clearing. These timings measure dispatcher availability, not transaction completion: reading and saving the entire JSON document still takes substantial time at 100,000 rows. A storage redesign remains a separate throughput improvement.
 
 ## Unified scheduler verification
 

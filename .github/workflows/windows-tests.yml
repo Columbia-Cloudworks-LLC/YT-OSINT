@@ -48,3 +48,6 @@ jobs:
       - name: Exercise discovery-first queue and terminal history clearing
         shell: powershell
         run: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-DiscoveryQueueIntegration.ps1
+      - name: Exercise large-queue responsiveness
+        shell: powershell
+        run: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-QueuePerformanceIntegration.ps1 -Sizes 12000

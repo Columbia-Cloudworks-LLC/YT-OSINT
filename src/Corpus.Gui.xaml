@@ -1,4 +1,4 @@
-﻿<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Title="YT-OSINT | YouTube Corpus" Width="1280" Height="820" MinWidth="1000" MinHeight="680" WindowStartupLocation="CenterScreen" Background="#F3F5F8" FontFamily="Segoe UI" FontSize="13">
+﻿<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:q="clr-namespace:YouTubeCorpus;assembly=QueueViewAssembly" Title="YT-OSINT | YouTube Corpus" Width="1280" Height="820" MinWidth="1000" MinHeight="680" WindowStartupLocation="CenterScreen" Background="#F3F5F8" FontFamily="Segoe UI" FontSize="13">
 <Window.Resources>
 <Style TargetType="Button"><Setter Property="Padding" Value="14,7"/><Setter Property="Margin" Value="4"/><Setter Property="MinHeight" Value="34"/></Style>
 <Style TargetType="TextBox"><Setter Property="Padding" Value="7"/><Setter Property="Margin" Value="4"/><Setter Property="MinHeight" Value="34"/></Style>
@@ -45,13 +45,13 @@
 <TextBlock Text="Clear finished removes history only. Pause finishes the active item safely. Saved queues reopen paused." TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,20,0"/>
 <Button x:Name="QueueToggle" Grid.Column="1" Content="Start" MinWidth="120" ToolTip="Start the entire queue. Queued channels are listed before video downloads."/>
 </Grid>
-<DataGrid x:Name="QueueGrid" SelectionMode="Extended" SelectionUnit="FullRow" AutoGenerateColumns="False" Margin="4"><DataGrid.Columns>
+<q:QueueGrid x:Name="QueueGrid" Style="{StaticResource {x:Type DataGrid}}" SelectionMode="Extended" SelectionUnit="FullRow" AutoGenerateColumns="False" Margin="4" RowHeight="36" ScrollViewer.CanContentScroll="True" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"><DataGrid.Columns>
 <DataGridTemplateColumn Header="Status" SortMemberPath="Status" Width="140"><DataGridTemplateColumn.CellTemplate><DataTemplate><StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="4" ToolTip="{Binding Detail}"><Border Width="20" Height="20" CornerRadius="10" Background="{Binding StatusColor}" Margin="0,0,7,0"><TextBlock Text="{Binding StatusGlyph}" Foreground="White" FontFamily="Segoe UI Symbol" FontWeight="Bold" HorizontalAlignment="Center" VerticalAlignment="Center"/></Border><TextBlock Text="{Binding StatusLabel}" VerticalAlignment="Center"/></StackPanel></DataTemplate></DataGridTemplateColumn.CellTemplate></DataGridTemplateColumn>
 <DataGridTextColumn Header="Video" Binding="{Binding Title}" Width="240"/>
 <DataGridTextColumn Header="Subject" Binding="{Binding SubjectName}" Width="150"/>
 <DataGridTextColumn Header="URL" Binding="{Binding Url}" Width="250"/>
 <DataGridTextColumn Header="Details" Binding="{Binding Detail}" Width="*"/>
-</DataGrid.Columns></DataGrid>
+</DataGrid.Columns></q:QueueGrid>
 </DockPanel></TabItem>
 <TabItem Header="Corpus"><DockPanel Margin="12">
 <StackPanel DockPanel.Dock="Top">
