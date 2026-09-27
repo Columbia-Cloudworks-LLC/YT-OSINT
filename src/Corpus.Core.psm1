@@ -60,6 +60,7 @@ function Test-CorpusSubjectQueued {
     param([string]$Root,[string]$SubjectId)
     if(-not $SubjectId){return $false}
     $queue=Read-CorpusJson (Join-Path $Root 'data/queue.json')
+    if($queue -and $queue.PSObject.Properties['SyncJobs'] -and @($queue.SyncJobs | Where-Object {$_.SubjectId -eq $SubjectId -and $_.Status -in @('Pending','Discovering','Downloading','Cancelling')}).Count){return $true}
     return ($queue -and @($queue.Items | Where-Object {$_.SubjectId -eq $SubjectId -and $_.Status -in @('Pending','Running')}).Count -gt 0)
 }
 function Set-CorpusSubject {

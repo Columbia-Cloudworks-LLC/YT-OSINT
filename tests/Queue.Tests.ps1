@@ -151,3 +151,124 @@ Describe 'Queue isolation and real cached ingestion' {
         (Read-CorpusJson (Join-Path $root "data/normalized/videos/$($v.VideoId).json")).TranscriptAvailable | Should Be $true
     }
 }
+
+Describe 'Universal channel and batch scheduler' {
+    BeforeEach {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));$ctx=New-CorpusContext $root
+        Copy-Item (Join-Path $PSScriptRoot fixtures/config.json) (Join-Path $root config.json)
+        $url='https://www.youtube.com/@atmoio'
+        $shared=[hashtable]::Synchronized(@{Cancel=$false;Shutdown=$false;Progress=$null;Messages=[Collections.Concurrent.ConcurrentQueue[string]]::new()})
+        Mock Sync-CorpusChannel -ModuleName Corpus.Queue {[pscustomobject]@{ChannelId='UC1234567890123456789012';Entries=@([pscustomobject]@{id='abcDEF12_-3';title='Discovered video'})}}
+        Mock Invoke-CorpusOperation -ModuleName Corpus.Queue {[pscustomobject]@{MembersOnlySkipped=0;TranscriptsUnavailable=0;FinalState='Success'}}
+    }
+    It 'locks subjects before discovery and suppresses duplicate channel jobs' {
+        $id=Add-CorpusSyncJob $root $url mo
+        (Get-CorpusQueue $root).Items.Count | Should Be 0
+        {Set-CorpusSubject $root Renamed mo} | Should Throw
+        {Remove-CorpusSubject $root mo} | Should Throw
+        $null=Add-CorpusSyncJob $root $url mo
+        (Get-CorpusQueue $root).SyncJobs.Count | Should Be 1
+        Stop-CorpusSyncJob $root $id
+        Set-CorpusSubject $root Renamed mo | Should Be mo
+    }
+    It 'discovers channel videos and completes them through the ordinary queue worker' {
+        $null=Add-CorpusSyncJob $root $url mo
+        Invoke-CorpusQueue $root $shared
+        $q=Get-CorpusQueue $root;$q.SyncJobs[0].Status | Should Be Completed;$q.Items[0].Status | Should Be Completed
+        $q.Items[0].SubjectId | Should Be mo;$q.Items[0].ListingEntry.title | Should Be 'Discovered video'
+        Assert-MockCalled Invoke-CorpusOperation -ModuleName Corpus.Queue -Times 1 -Exactly -Scope It
+    }
+    It 'shares a pending batch video and preserves it when cancelling its channel sync' {
+        $id=Add-CorpusSyncJob $root $url mo
+        $null=Add-CorpusQueueUrls $root 'https://youtu.be/abcDEF12_-3' mo
+        $q=Get-CorpusQueue $root;$q.SyncJobs[0].Status='Discovering';Write-CorpusJson (Join-Path $root data/queue.json) $q
+        (Add-CorpusQueueUrls $root 'https://youtu.be/abcDEF12_-3' mo -JobId $id).Duplicates | Should Be 1
+        $q=Get-CorpusQueue $root;$q.SyncJobs[0].Status='Downloading';Write-CorpusJson (Join-Path $root data/queue.json) $q
+        Stop-CorpusSyncJob $root $id
+        $q=Get-CorpusQueue $root;$q.Items.Count | Should Be 1;$q.Items[0].Status | Should Be Pending
+        Invoke-CorpusQueue $root $shared
+        (Get-CorpusQueue $root).SyncJobs[0].Status | Should Be Cancelled
+    }
+    It 'cancels sync-owned pending items and preserves an active item until it finishes' {
+        $id=Add-CorpusSyncJob $root $url mo
+        $q=Get-CorpusQueue $root;$q.SyncJobs[0].Status='Discovering';Write-CorpusJson (Join-Path $root data/queue.json) $q
+        $null=Add-CorpusQueueUrls $root "https://youtu.be/abcDEF12_-3`nhttps://youtu.be/xyzDEF12_-3" mo -JobId $id
+        $q=Get-CorpusQueue $root;$q.SyncJobs[0].Status='Downloading';$q.Items[0].Status='Running';Write-CorpusJson (Join-Path $root data/queue.json) $q
+        Stop-CorpusSyncJob $root $id
+        $q=Get-CorpusQueue $root;$q.Items[0].Status | Should Be Running;$q.Items[1].Status | Should Be Cancelled;$q.SyncJobs[0].Status | Should Be Cancelling
+        $null=Add-CorpusSyncJob $root $url mo
+        (Get-CorpusQueue $root).SyncJobs.Count | Should Be 1
+    }
+    It 'does not discover the next channel until the first channel downloads finish' {
+        $null=Add-CorpusSyncJob $root $url mo
+        $null=Add-CorpusSyncJob $root 'https://www.youtube.com/@lessbitter' mo
+        Mock Sync-CorpusChannel -ModuleName Corpus.Queue {
+            if($Url -match 'lessbitter'){
+                if((Get-CorpusQueue $Context.Root).SyncJobs[0].Status -ne 'Completed'){throw 'Second discovery ran early'}
+                return [pscustomobject]@{ChannelId='UC2234567890123456789012';Entries=@()}
+            }
+            [pscustomobject]@{ChannelId='UC1234567890123456789012';Entries=@([pscustomobject]@{id='abcDEF12_-3'})}
+        }
+        Invoke-CorpusQueue $root $shared
+        @((Get-CorpusQueue $root).SyncJobs | Where-Object Status -eq Completed).Count | Should Be 2
+    }
+    It 'continues past failed discovery and unlocks the failed channel' {
+        $null=Add-CorpusSyncJob $root $url mo
+        Mock Sync-CorpusChannel -ModuleName Corpus.Queue {throw 'Discovery fixture failure'}
+        $null=Add-CorpusQueueUrls $root 'https://youtu.be/abcDEF12_-3' mo
+        Invoke-CorpusQueue $root $shared
+        $q=Get-CorpusQueue $root;$q.SyncJobs[0].Status | Should Be Failed;$q.Items[0].Status | Should Be Completed
+        $null=Add-CorpusSyncJob $root $url mo
+        (Get-CorpusQueue $root).SyncJobs.Count | Should Be 2
+    }
+    It 'pauses exhausted discovery throttling and retains the job for resume' {
+        $null=Add-CorpusSyncJob $root $url mo
+        Mock Sync-CorpusChannel -ModuleName Corpus.Queue {Stop-CorpusRateLimit}
+        Invoke-CorpusQueue $root $shared
+        $q=Get-CorpusQueue $root;$q.Paused | Should Be $true;$q.SyncJobs[0].Status | Should Be Pending
+    }
+    It 'recovers interrupted discovery paused and upgrades legacy queues without losing items' {
+        $null=Add-CorpusQueueUrls $root 'https://youtu.be/abcDEF12_-3' mo
+        $q=Get-CorpusQueue $root;$q.PSObject.Properties.Remove('SyncJobs');$q.Items[0].PSObject.Properties.Remove('JobIds');$q.Items[0].PSObject.Properties.Remove('Batch');Write-CorpusJson (Join-Path $root data/queue.json) $q
+        (Initialize-CorpusQueue $root).Items[0].Batch | Should Be $true
+        $null=Add-CorpusSyncJob $root $url mo
+        $q=Get-CorpusQueue $root;$q.SyncJobs[0].Status='Discovering';Write-CorpusJson (Join-Path $root data/queue.json) $q
+        (Initialize-CorpusQueue $root).SyncJobs[0].Status | Should Be Pending
+    }
+    It 'retains a failed child for sync accounting when it is retried before other children finish' {
+        $id=Add-CorpusSyncJob $root $url mo
+        $q=Get-CorpusQueue $root;$q.SyncJobs[0].Status='Discovering';Write-CorpusJson (Join-Path $root data/queue.json) $q
+        $null=Add-CorpusQueueUrls $root "https://youtu.be/abcDEF12_-3`nhttps://youtu.be/xyzDEF12_-3" mo -JobId $id
+        $q=Get-CorpusQueue $root;$q.SyncJobs[0].Status='Downloading';$q.Items[0].Status='Failed';Write-CorpusJson (Join-Path $root data/queue.json) $q
+        Update-CorpusQueue $root Retry $q.Items[0].Id
+        $q=Get-CorpusQueue $root;$q.Items.Count | Should Be 3;$q.Items[0].Status | Should Be Failed;$q.Items[2].Status | Should Be Pending
+        Invoke-CorpusQueue $root $shared
+        (Get-CorpusQueue $root).SyncJobs[0].Status | Should Be Partial
+    }
+    It 'keeps failures retryable without keeping a finished channel locked' {
+        $null=Add-CorpusSyncJob $root $url mo
+        Mock Invoke-CorpusOperation -ModuleName Corpus.Queue {throw 'Video failed'}
+        Invoke-CorpusQueue $root $shared
+        $q=Get-CorpusQueue $root;$q.SyncJobs[0].Status | Should Be Partial
+        Update-CorpusQueue $root Retry $q.Items[0].Id
+        $q=Get-CorpusQueue $root;$q.Items[0].Status | Should Be Pending;$q.Items[0].JobIds.Count | Should Be 0
+    }
+}
+
+Describe 'Channel discovery without inline downloads' {
+    BeforeEach {
+        $root=Join-Path $TestDrive ([guid]::NewGuid().ToString('N'));$ctx=New-CorpusContext $root
+        Copy-Item (Join-Path $PSScriptRoot fixtures/config.json) (Join-Path $root config.json)
+        Mock Invoke-CorpusYouTubeProcess -ModuleName Corpus.YouTube {[pscustomobject]@{ExitCode=0;StdErr='';StdOut='{"id":"UC1234567890123456789012","channel":"Discovered name","entries":[{"id":"abcDEF12_-3","title":"Members video","availability":"subscriber_only"},{"entries":[{"id":"xyzDEF12_-3","title":"Public video"}]}]}'}}
+        Mock Import-CorpusVideo -ModuleName Corpus.YouTube {throw 'Discovery should not download'}
+    }
+    It 'persists the resolved name and returns nested listing entries for later queue imports' {
+        $run=[pscustomobject]@{VideosDiscovered=0;Failures=0;MembersOnlySkipped=0}
+        $result=Sync-CorpusChannel $ctx 'https://www.youtube.com/@atmoio' mo Mo $run -DiscoverOnly
+        $result.Entries.Count | Should Be 2;$result.Entries[0].availability | Should Be subscriber_only
+        $result.Entries[0].channel_id | Should Be UC1234567890123456789012;$result.Entries[0].channel | Should Be 'Discovered name'
+        $channel=Read-CorpusJson (Join-Path $root data/normalized/channels/UC1234567890123456789012.json)
+        $channel.ChannelName | Should Be 'Discovered name';$channel.Status | Should Be Queued
+        Assert-MockCalled Import-CorpusVideo -ModuleName Corpus.YouTube -Times 0 -Exactly -Scope It
+    }
+}

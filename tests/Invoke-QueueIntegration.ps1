@@ -30,7 +30,7 @@ $check={
     switch($state.QueueTestStage){
         0 {
             $ui.QueueTab.IsSelected=$true
-            $ui.VideoSubject.SelectedItem=$ui.VideoSubject.Items[0]
+            $ui.Tabs.SelectedIndex=0;$ui.SubjectPick.SelectedItem=$ui.SubjectPick.Items[0]
             $ui.VideoUrl.Text="https://youtu.be/abcDEF12_-3`nhttps://youtu.be/xyzDEF12_-3"
             Click $ui.ImportVideo;$state.QueueTestStage=1
         }

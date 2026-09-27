@@ -41,16 +41,30 @@ function Show-CorpusWindow {
     }
     foreach($entry in @{OpenTranscript='Transcript';OpenResult='YouTube';OpenWorkbook='Excel';Build='Export'}.GetEnumerator()){Set-CorpusButtonIcon $ui[$entry.Key] $entry.Value}
     $state=@{Worker=$null;Handle=$null;Shared=$null;Operation='';Snapshot=$null;Ready=[bool]$SkipDependencies;Closing=$false;PendingSubject='';SmokeTicks=0;LastOutcome='Ready';CheckedStartup=(([bool]$SkipDependencies -or [bool]$SmokeTest) -and -not $SmokeCheckDependencies);RestartRequired=$false;RestartTicket=$null;DependencyRows=@();SmokeStage=0;ViewerVerified=$false;SmokeError='';QueueWorker=$null;QueueHandle=$null;QueueShared=$null;Queue=(Initialize-CorpusQueue $Root);QueueStamp='';SelectCreatedSubject=$false;QueueTicks=0;NeedsRefresh=$false}
-    $mutators=@('CreateSubject','RemoveSubject','RenameSubject','AddChannel','RemoveChannel','SyncSelected','SyncAll','Refresh','CreateVideoSubject','ImportVideo','Build','Search','FilterCorpus','RefreshChannelTranscripts','RefreshVideoTranscript','OpenTranscript','AutoExport','QueueStart','QueuePause','QueueRemove','QueueRetry','QueueClear')
+    $mutators=@('CreateSubject','RemoveSubject','RenameSubject','AddChannel','RemoveChannel','SyncSelected','SyncAll','Refresh','CancelSync','ImportVideo','Build','Search','FilterCorpus','RefreshChannelTranscripts','RefreshVideoTranscript','OpenTranscript','AutoExport','QueueStart','QueuePause','QueueRemove','QueueRetry','QueueClear')
     $ui.Paths.Text="Application and corpus root: $Root`nWorkbook: $(Join-Path $Root 'output/YouTubeCorpus.xlsx')`nSource configuration: $(Join-Path $Root 'config.json')`nNative dependencies: $(Get-CorpusNativeRoot)"
     $dependencySettings=Get-CorpusDependencySettings $Root
     $ui.DependencyChannel.SelectedIndex=if($dependencySettings.YtDlpChannel -eq 'nightly'){1}else{0}
+    function Get-SelectedSyncJob {
+        $c=$ui.ChannelsGrid.SelectedItem
+        if($c){return ($state.Queue.SyncJobs | Where-Object {$_.Url -eq $c.Url -or ($c.ChannelId -and $_.ChannelId -eq $c.ChannelId)} | Select-Object -Last 1)}
+    }
+    function Show-ChannelDetails {
+        $c=$ui.ChannelsGrid.SelectedItem;$job=Get-SelectedSyncJob
+        $active=$job -and $job.Status -in @('Pending','Discovering','Downloading','Cancelling')
+        $available=(-not $state.Worker -and $state.Ready -and -not $state.RestartRequired -and -not $state.Closing)
+        $ui.SyncSelected.IsEnabled=($available -and [bool]$c -and -not $active)
+        $ui.CancelSync.IsEnabled=($available -and $active -and $job.Status -ne 'Cancelling')
+        $ui.ChannelHeading.Text=if($c){$c.DisplayName}else{'Select a channel'}
+        $ui.ChannelSyncStatus.Text=if($job){"$(if($job.Status -eq 'Pending'){'Queued'}else{$job.Status}) — $(if($job.Status -eq 'Downloading'){$children=@($state.Queue.Items | Where-Object {$job.Id -in $_.JobIds});"$(@($children | Where-Object Status -eq Pending).Count) pending; $(@($children | Where-Object Status -eq Running).Count) active"}else{$job.Detail})"}else{'Queue a sync to discover videos and download their transcripts.'}
+        $ui.ChannelDetails.ItemsSource=@(if($c){foreach($field in @('Subject','ChannelName','ChannelId','Url','VideosDiscovered','WithTranscripts','WithoutTranscripts','LastSuccessfulSync','LastAttempt','Status')){[pscustomobject]@{Field=($field -creplace '([a-z])([A-Z])','$1 $2');Value=$c.$field}}})
+    }
     function Update-SubjectLock {
         $selected=$ui.SubjectPick.SelectedItem
-        $locked=$selected -and @($state.Queue.Items | Where-Object {$_.SubjectId -eq $selected.id -and $_.Status -in @('Pending','Running')}).Count -gt 0
+        $locked=$selected -and (Test-CorpusSubjectQueued $Root $selected.id)
         $canEdit=(-not $state.Worker -and $state.Ready -and -not $state.RestartRequired -and [bool]$selected)
         $ui.RenameSubject.IsEnabled=($canEdit -and -not $locked);$ui.RemoveSubject.IsEnabled=($canEdit -and -not $locked -and -not $state.QueueWorker)
-        $ui.AddChannel.IsEnabled=$canEdit;$ui.RemoveChannel.IsEnabled=$canEdit;$ui.SubjectName.IsEnabled=$canEdit;$ui.ChannelUrl.IsEnabled=$canEdit
+        $ui.ImportVideo.IsEnabled=$canEdit;$ui.AddChannel.IsEnabled=$canEdit;$ui.RemoveChannel.IsEnabled=$canEdit;$ui.SubjectName.IsEnabled=$canEdit;$ui.ChannelUrl.IsEnabled=$canEdit
         $ui.SubjectLockNotice.Text=if($locked){'This subject has queued work. Renaming and removal are locked until those items finish or are removed.'}elseif($state.QueueWorker){'Pause the queue and let the current item finish before removing subjects.'}else{''}
     }
     function Update-QueueButtons {
@@ -59,7 +73,7 @@ function Show-CorpusWindow {
         $ui.QueueRemove.IsEnabled=($available -and $selected -and $selected.Status -eq 'Pending')
         $ui.QueueRetry.IsEnabled=($available -and $selected -and $selected.Status -in @('Failed','Cancelled'))
         $ui.QueueClear.IsEnabled=($available -and @($state.Queue.Items | Where-Object {$_.Status -notin @('Pending','Running')}).Count -gt 0)
-        $ui.QueueStart.IsEnabled=($available -and -not $state.QueueWorker -and @($state.Queue.Items | Where-Object Status -eq Pending).Count -gt 0)
+        $ui.QueueStart.IsEnabled=($available -and -not $state.QueueWorker -and (@($state.Queue.Items | Where-Object Status -eq Pending).Count + @($state.Queue.SyncJobs | Where-Object Status -eq Pending).Count) -gt 0)
         $ui.QueuePause.IsEnabled=($available -and [bool]$state.QueueWorker -and -not $state.Queue.Paused)
         $ui.QueueCancel.IsEnabled=([bool]$state.QueueWorker -and -not $state.QueueShared.Cancel)
     }
@@ -70,18 +84,18 @@ function Show-CorpusWindow {
         foreach($item in $state.Queue.Items){if($item.Id -eq $selected){$ui.QueueGrid.SelectedItem=$item;break}}
         $pending=@($state.Queue.Items | Where-Object Status -eq Pending).Count
         $active=@($state.Queue.Items | Where-Object Status -eq Running).Count
-        $ui.QueueStatus.Text="$(if($state.Queue.Paused){'Paused'}else{'Running'}) | $pending pending | $active active"
-        Update-SubjectLock;Update-QueueButtons
+        $ui.QueueStatus.Text="$(if($state.Queue.Paused){'Paused'}else{'Running'}) | $pending pending | $active active | $(@($state.Queue.SyncJobs | Where-Object Status -in @('Pending','Discovering','Downloading','Cancelling')).Count) channel syncs"
+        Update-SubjectLock;Update-QueueButtons;Show-ChannelDetails
     }
     function Set-Busy([bool]$Busy) {
         foreach($name in $mutators){$ui[$name].IsEnabled=(-not $Busy -and $state.Ready -and -not $state.RestartRequired)}
         foreach($name in @('CheckDependencies','UpdateDependencies','RecoverDependencies','DependencyChannel','DependenciesGrid')){$ui[$name].IsEnabled=(-not $Busy)}
         $ui.RestartApplication.IsEnabled=(-not $Busy);$ui.RestartApplication.Visibility=if($state.RestartRequired){'Visible'}else{'Collapsed'}
-        if($state.QueueWorker){foreach($name in @('SyncSelected','SyncAll','Build','CheckDependencies','UpdateDependencies','RecoverDependencies','DependencyChannel','DependenciesGrid','RestartApplication','QueueStart')){$ui[$name].IsEnabled=$false}}
+        if($state.QueueWorker){foreach($name in @('Build','CheckDependencies','UpdateDependencies','RecoverDependencies','DependencyChannel','DependenciesGrid','RestartApplication','QueueStart')){$ui[$name].IsEnabled=$false}}
         $ui.QueuePause.IsEnabled=(-not $Busy -and [bool]$state.QueueWorker)
         $ui.QueueCancel.IsEnabled=([bool]$state.QueueWorker -and -not $state.QueueShared.Cancel)
         $ui.Cancel.IsEnabled=$Busy -and $state.Operation -notin @('Bootstrap','RecoverDependencies')
-        Update-SubjectLock;Update-QueueButtons
+        Update-SubjectLock;Update-QueueButtons;Show-ChannelDetails
     }
     function Get-DependencyChannel {return [string]$ui.DependencyChannel.SelectedItem.Content}
     function Set-DependencyRows($Rows) {
@@ -114,6 +128,8 @@ function Show-CorpusWindow {
                     'RecoverDependencies' {return Repair-CorpusDependencies $ctx}
                 }
             }
+            if($op -eq 'SyncAdd'){foreach($source in $argsMap.Sources){$null=Add-CorpusSyncJob $root $source.Url $source.SubjectId -RefreshTranscript:([bool]$argsMap.RefreshTranscript) -ExportWorkbook:([bool]$argsMap.ExportWorkbook)};return}
+            if($op -eq 'SyncCancel'){Stop-CorpusSyncJob $root $argsMap.Id;return}
             if($op -eq 'QueueAdd'){return Add-CorpusQueueUrls $root $argsMap.Text $argsMap.SubjectId -RefreshTranscript:([bool]$argsMap.RefreshTranscript) -ExportWorkbook:([bool]$argsMap.ExportWorkbook)}
             if($op -eq 'QueueAction'){Update-CorpusQueue $root $argsMap.Action $argsMap.Id;return}
             if($op -eq 'Transcript') {
@@ -145,11 +161,10 @@ function Show-CorpusWindow {
         $oldSubjectName=if($ui.SubjectPick.SelectedItem){$ui.SubjectPick.SelectedItem.name}else{''}
         $state.Snapshot=$Snapshot
         $subjectId=if($state.ContainsKey('PendingSubjectId') -and $state.PendingSubjectId){$state.PendingSubjectId}elseif($ui.SubjectPick.SelectedItem){$ui.SubjectPick.SelectedItem.id}else{''}
-        $videoId=if($ui.VideoSubject.SelectedItem){$ui.VideoSubject.SelectedItem.id}else{''}
         $searchId=if($ui.SearchSubject.SelectedItem){$ui.SearchSubject.SelectedItem.id}else{''}
-        foreach($name in @('SubjectPick','VideoSubject')){$ui[$name].ItemsSource=@($Snapshot.Config.subjects)}
+        $ui.SubjectPick.ItemsSource=@($Snapshot.Config.subjects | Sort-Object name -Descending:($ui.SubjectSort.SelectedIndex -eq 1))
         $ui.SearchSubject.ItemsSource=@(foreach($s in $Snapshot.Config.subjects){[pscustomobject]@{id=$s.id;DisplayName=$s.name}};foreach($s in $Snapshot.Config.archivedSubjects){[pscustomobject]@{id=$s.id;DisplayName=($s.name+' (archived)')}})
-        foreach($s in $Snapshot.Config.subjects){if($s.id -eq $subjectId){$ui.SubjectPick.SelectedItem=$s};if($s.id -eq $videoId -or $s.name -eq $state.PendingSubject){$ui.VideoSubject.SelectedItem=$s};if($s.id -eq $searchId){$ui.SearchSubject.SelectedItem=@($ui.SearchSubject.Items | Where-Object id -eq $searchId)[0]}}
+        foreach($s in $Snapshot.Config.subjects){if($s.id -eq $subjectId){$ui.SubjectPick.SelectedItem=$s};if($s.id -eq $searchId){$ui.SearchSubject.SelectedItem=@($ui.SearchSubject.Items | Where-Object id -eq $searchId)[0]}}
         foreach($s in $Snapshot.Config.archivedSubjects){if($s.id -eq $searchId){$ui.SearchSubject.SelectedItem=@($ui.SearchSubject.Items | Where-Object id -eq $searchId)[0]}}
         $state.PendingSubject='';$state.PendingSubjectId=''
         if(-not $ui.SubjectPick.SelectedItem -and $Snapshot.Config.subjects.Count){$ui.SubjectPick.SelectedIndex=0}
@@ -158,7 +173,17 @@ function Show-CorpusWindow {
             if($known.Count){$k=$known[0];[pscustomobject]@{Subject=$s.name;ChannelName=$k.ChannelName;ChannelId=$k.ChannelId;Url=$c.url;VideosDiscovered=$k.VideosDiscovered;WithTranscripts=$k.TranscriptCount;WithoutTranscripts=$k.WithoutTranscripts;LastSuccessfulSync=$k.LastSync;LastAttempt=$(if($attempt.Count){$attempt[0].LastAttempt}else{$k.LastAttempt});Status=$(if($attempt.Count){$attempt[0].Status}else{$k.Status})}}
             else{[pscustomobject]@{Subject=$s.name;ChannelName='';ChannelId='';Url=$c.url;VideosDiscovered=0;WithTranscripts=0;WithoutTranscripts=0;LastSuccessfulSync='';LastAttempt=$(if($attempt.Count){$attempt[0].LastAttempt}else{''});Status=$(if($attempt.Count){$attempt[0].Status}else{'Not imported'})}}
         }})
-        $ui.ChannelsGrid.ItemsSource=$channelRows
+        $selectedUrl=if($ui.ChannelsGrid.SelectedItem){$ui.ChannelsGrid.SelectedItem.Url}else{''}
+        foreach($row in $channelRows){
+            $owner=@($Snapshot.Config.subjects | Where-Object name -eq $row.Subject)[0]
+            $row | Add-Member NoteProperty SubjectId $owner.id
+            $label=if($row.ChannelName){$row.ChannelName}else{([uri]::UnescapeDataString(([uri]$row.Url).AbsolutePath.Trim('/')))+" ($($row.Subject))"}
+            $row | Add-Member NoteProperty DisplayName $label
+        }
+        $ui.ChannelsGrid.ItemsSource=@($channelRows | Sort-Object DisplayName)
+        foreach($row in $ui.ChannelsGrid.Items){if($row.Url -eq $selectedUrl){$ui.ChannelsGrid.SelectedItem=$row;break}}
+        if(-not $ui.ChannelsGrid.SelectedItem -and $channelRows.Count){$ui.ChannelsGrid.SelectedIndex=0}
+        Show-ChannelDetails
         $ui.CorpusGrid.ItemsSource=@($Snapshot.Videos | Select-Object SubjectName,ChannelName,VideoTitle,VideoId,PublishedDate,Duration,TranscriptAvailable,SubtitleSource,LastSyncStatus,VideoUrl)
         Show-SubjectChannels
         if($ui.SubjectPick.SelectedItem -and $ui.SubjectPick.SelectedItem.id -eq $subjectId -and -not $state.SelectCreatedSubject -and $subjectDraft -ne $oldSubjectName){$ui.SubjectName.Text=$subjectDraft}
@@ -199,12 +224,13 @@ function Show-CorpusWindow {
     $ui.RenameSubject.Add_Click({try{$s=Get-SelectedSubject;Start-Work 'Subject' @{Name=$ui.SubjectName.Text;Id=$s.id}}catch{Show-UiError $_.Exception.Message}})
     $ui.AddChannel.Add_Click({try{$s=Get-SelectedSubject;Start-Work 'Associate' @{SubjectId=$s.id;Url=$ui.ChannelUrl.Text.Trim();Remove=$false}}catch{Show-UiError $_.Exception.Message}})
     $ui.RemoveChannel.Add_Click({try{$s=Get-SelectedSubject;if(-not $ui.SubjectChannels.SelectedItem){throw 'Select a channel association to remove.'};Start-Work 'Associate' @{SubjectId=$s.id;Url=$ui.SubjectChannels.SelectedItem.url;Remove=$true}}catch{Show-UiError $_.Exception.Message}})
-    $ui.SyncSelected.Add_Click({if($ui.ChannelsGrid.SelectedItem){Start-Work 'SyncChannel' @{Url=$ui.ChannelsGrid.SelectedItem.Url;RefreshTranscript=[bool]$ui.RefreshChannelTranscripts.IsChecked}}else{Show-UiError 'Select a channel first.'}})
-    $ui.SyncAll.Add_Click({Start-Work 'SyncAll' @{RefreshTranscript=[bool]$ui.RefreshChannelTranscripts.IsChecked}})
+    $ui.SubjectSort.Add_SelectionChanged({if($state.Snapshot){$id=if($ui.SubjectPick.SelectedItem){$ui.SubjectPick.SelectedItem.id}else{''};$ui.SubjectPick.ItemsSource=@($state.Snapshot.Config.subjects | Sort-Object name -Descending:($ui.SubjectSort.SelectedIndex -eq 1));foreach($subject in $ui.SubjectPick.Items){if($subject.id -eq $id){$ui.SubjectPick.SelectedItem=$subject;break}}}})
+    $ui.ChannelsGrid.Add_SelectionChanged({Show-ChannelDetails})
+    $ui.SyncSelected.Add_Click({if($ui.ChannelsGrid.SelectedItem){$c=$ui.ChannelsGrid.SelectedItem;Start-Work 'SyncAdd' @{Sources=@(@{Url=$c.Url;SubjectId=$c.SubjectId});RefreshTranscript=[bool]$ui.RefreshChannelTranscripts.IsChecked;ExportWorkbook=[bool]$ui.AutoExport.IsChecked}}})
+    $ui.SyncAll.Add_Click({$sources=@(foreach($s in $state.Snapshot.Config.subjects){foreach($c in $s.channels){@{Url=$c.url;SubjectId=$s.id}}});Start-Work 'SyncAdd' @{Sources=$sources;RefreshTranscript=[bool]$ui.RefreshChannelTranscripts.IsChecked;ExportWorkbook=[bool]$ui.AutoExport.IsChecked}})
+    $ui.CancelSync.Add_Click({$job=Get-SelectedSyncJob;if($job){if($state.QueueShared){$state.QueueShared.CancelSyncId=$job.Id};Start-Work 'SyncCancel' @{Id=$job.Id}}})
     $ui.Refresh.Add_Click({Start-Work 'Refresh'})
-    $ui.ClearVideoSubject.Add_Click({$ui.VideoSubject.SelectedIndex=-1})
-    $ui.CreateVideoSubject.Add_Click({$state.PendingSubject=$ui.NewVideoSubject.Text.Trim();Start-Work 'Subject' @{Name=$state.PendingSubject;Id=''}})
-    $ui.ImportVideo.Add_Click({$s=$ui.VideoSubject.SelectedItem;Start-Work 'QueueAdd' @{Text=$ui.VideoUrl.Text;SubjectId=$(if($s){$s.id}else{''});RefreshTranscript=[bool]$ui.RefreshVideoTranscript.IsChecked;ExportWorkbook=[bool]$ui.AutoExport.IsChecked}})
+    $ui.ImportVideo.Add_Click({try{$s=Get-SelectedSubject;Start-Work 'QueueAdd' @{Text=$ui.VideoUrl.Text;SubjectId=$s.id;RefreshTranscript=[bool]$ui.RefreshVideoTranscript.IsChecked;ExportWorkbook=[bool]$ui.AutoExport.IsChecked}}catch{Show-UiError $_.Exception.Message}})
     function Start-QueueWork {
         if($state.QueueWorker -or $state.Worker -or $state.Closing -or -not $state.Ready -or $state.RestartRequired){return}
         $state.QueueShared=[hashtable]::Synchronized(@{Cancel=$false;Shutdown=$false;Progress=$null;Messages=[Collections.Concurrent.ConcurrentQueue[string]]::new()})
@@ -261,7 +287,7 @@ function Show-CorpusWindow {
     $timer.Add_Tick({
         $state.QueueTicks++
         if($state.QueueTicks % 5 -eq 0){
-            try{$file=Get-Item (Join-Path $Root 'data/queue.json') -ErrorAction SilentlyContinue;$stamp=if($file){$file.LastWriteTimeUtc.Ticks.ToString()}else{''};if($stamp -ne $state.QueueStamp){$state.QueueStamp=$stamp;Refresh-QueueView}}catch{$ui.QueueStatus.Text=$_.Exception.Message}
+            try{$file=Get-Item (Join-Path $Root 'data/queue.json') -ErrorAction SilentlyContinue;$stamp=if($file){$file.LastWriteTimeUtc.Ticks.ToString()}else{''};if($stamp -ne $state.QueueStamp){$state.QueueStamp=$stamp;Refresh-QueueView;$state.NeedsRefresh=$true}}catch{$ui.QueueStatus.Text=$_.Exception.Message}
         }
         if($state.QueueWorker){
             $queueMessage='';$queueCount=0
@@ -328,6 +354,8 @@ function Show-CorpusWindow {
                     'Subject' {if($state.SelectCreatedSubject -and $result.Count){$state.PendingSubjectId=[string]$result[-1]}}
                     'QueueAdd' {if($result.Count){$ui.QueueAddNotice.Text="$($result[-1].Added) added; $($result[-1].Duplicates) duplicates skipped";if($ui.VideoUrl.Text -eq $state.QueuedInput){$ui.VideoUrl.Clear()}};Refresh-QueueView}
                     'QueueAction' {Refresh-QueueView}
+                    'SyncAdd' {Refresh-QueueView;$ui.Status.Text='Channel sync queued. Use Video Queue to start or resume.'}
+                    'SyncCancel' {Refresh-QueueView}
                     'Filter' {$ui.CorpusGrid.ItemsSource=$result;$ui.CorpusGrid.Visibility='Visible';$ui.SearchGrid.Visibility='Collapsed';$ui.CorpusNotice.Text="$($result.Count) videos. Double-click a row to read its transcript."}
                     default {if($result.Count -and $result[-1].PSObject.Properties['FinalState']){$ui.Status.Text="$($result[-1].FinalState): $($result[-1].VideosDiscovered) discovered; $($result[-1].TranscriptsAdded) transcripts added; $($result[-1].TranscriptsUnavailable) unavailable; $($result[-1].Failures) failures; $(Get-CorpusProperty $result[-1] MembersOnlySkipped 0) members-only skipped"}}
                 }

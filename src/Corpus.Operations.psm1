@@ -39,7 +39,7 @@ function Invoke-CorpusOperation {
             'Refresh' {return [pscustomobject]@{Config=(Get-CorpusConfig $Root);Videos=@(Get-CorpusVideos $Root);Channels=@(Get-ChildItem (Join-Path $Root 'data/normalized/channels') -Filter '*.json' | ForEach-Object {Read-CorpusJson $_.FullName});Attempts=@(Get-ChildItem (Join-Path $Root 'data/normalized/channel-attempts') -Filter '*.json' -ErrorAction SilentlyContinue | ForEach-Object {Read-CorpusJson $_.FullName})}}
             'Video' {
                 $run.VideosDiscovered=1
-                try{$null=Import-CorpusVideo $ctx $Arguments.Url $Arguments.SubjectId $Arguments.SubjectName $run -RefreshTranscript:([bool]$Arguments['RefreshTranscript'])}
+                try{if((Get-CorpusProperty $Arguments['ListingEntry'] availability '') -eq 'subscriber_only'){$null=Save-CorpusMembersOnlyVideo $ctx $Arguments.ListingEntry.id $Arguments.SubjectId $Arguments.SubjectName $run $Arguments.ListingEntry}else{$null=Import-CorpusVideo $ctx $Arguments.Url $Arguments.SubjectId $Arguments.SubjectName $run -RefreshTranscript:([bool]$Arguments['RefreshTranscript']) -ListingEntry $Arguments['ListingEntry']}}
                 catch {
                     if($_.Exception -is [OperationCanceledException] -or (Test-CorpusRateLimitError $_.Exception)){throw}
                     $uri=[uri]$Arguments.Url; $id=''

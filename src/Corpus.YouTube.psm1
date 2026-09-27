@@ -196,7 +196,7 @@ function Save-CorpusFailure {
     Write-CorpusJson (Join-Path $Context.Root "data/raw/$ChannelId/$VideoId/observations/$($Context.RunId)-$([datetime]::UtcNow.Ticks)-failure.json") ([ordered]@{CapturedAt=$v.LastAttemptAt;Status='Failed';Message=$Message})
 }
 function Sync-CorpusChannel {
-    param($Context,[string]$Url,[string]$SubjectId,[string]$SubjectName,$Run,[int]$Limit=0,[switch]$RefreshTranscript)
+    param($Context,[string]$Url,[string]$SubjectId,[string]$SubjectName,$Run,[int]$Limit=0,[switch]$RefreshTranscript,[switch]$DiscoverOnly)
     $url=Assert-CorpusYouTubeUrl $Url
     $attempt=[datetime]::UtcNow.ToString('o'); $key=Get-CorpusId $url
     Write-CorpusJson (Join-Path $Context.Root "data/normalized/channel-attempts/$key.json") ([ordered]@{Url=$url;LastAttempt=$attempt;Status='Running'})
@@ -230,6 +230,13 @@ function Sync-CorpusChannel {
         if($Limit -gt 0 -and $entries.Count -gt $Limit){$entries=@($entries | Select-Object -First $Limit)}
         $Run.VideosDiscovered+=$entries.Count; $channel.VideosDiscovered=$entries.Count
         Write-CorpusJson (Join-Path $Context.Root "data/normalized/channels/$id.json") $channel
+        if($DiscoverOnly){
+            foreach($e in $entries){
+                if(-not (Get-CorpusProperty $e channel_id '')){$e | Add-Member NoteProperty channel_id $id -Force}
+                if(-not (Get-CorpusProperty $e channel '')){$e | Add-Member NoteProperty channel $channel.ChannelName -Force}
+            }
+            $channel.Status='Queued';return [pscustomobject]@{ChannelId=$id;Entries=@($entries)}
+        }
         if(-not $Run.PSObject.Properties['MembersOnlySkipped']){$Run | Add-Member NoteProperty MembersOnlySkipped 0}
         $n=0; $before=$Run.Failures; $skippedBefore=$Run.MembersOnlySkipped
         foreach($e in $entries) {

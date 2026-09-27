@@ -11,24 +11,29 @@
 <StatusBar DockPanel.Dock="Bottom" Margin="0,12,0,0" Background="#E4EAF2"><StatusBarItem><TextBlock x:Name="Status" Text="Starting…" Width="620" TextTrimming="CharacterEllipsis"/></StatusBarItem><StatusBarItem><ProgressBar x:Name="Progress" Width="210" Height="16"/></StatusBarItem><StatusBarItem><Button x:Name="Cancel" Content="Cancel" IsEnabled="False"/></StatusBarItem></StatusBar>
 <TabControl x:Name="Tabs">
 <TabItem Header="Subjects"><Grid Margin="12"><Grid.ColumnDefinitions><ColumnDefinition Width="280" MinWidth="200"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
-<DockPanel Margin="4"><Button x:Name="CreateSubject" DockPanel.Dock="Top" Content="Add subject" HorizontalAlignment="Left"/><TextBlock DockPanel.Dock="Top" Text="Select a subject to manage its channels." Margin="4,8" TextWrapping="Wrap"/><ListBox x:Name="SubjectPick" DisplayMemberPath="name" Padding="4" ScrollViewer.HorizontalScrollBarVisibility="Disabled"/></DockPanel>
+<DockPanel Margin="4"><Button x:Name="CreateSubject" DockPanel.Dock="Top" Content="Add subject" HorizontalAlignment="Left"/><ComboBox x:Name="SubjectSort" DockPanel.Dock="Top" SelectedIndex="0" MinWidth="0"><ComboBoxItem Content="A–Z"/><ComboBoxItem Content="Z–A"/></ComboBox><TextBlock DockPanel.Dock="Top" Text="Select a subject to manage its channels." Margin="4,8" TextWrapping="Wrap"/><ListBox x:Name="SubjectPick" DisplayMemberPath="name" Padding="4" ScrollViewer.HorizontalScrollBarVisibility="Disabled"/></DockPanel>
 <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="#D7DFEB"/>
-<DockPanel Grid.Column="2" Margin="12,4,4,4"><StackPanel DockPanel.Dock="Top">
+<Grid Grid.Column="2" Margin="12,4,4,4"><Grid.RowDefinitions><RowDefinition Height="3*" MinHeight="240"/><RowDefinition Height="8"/><RowDefinition Height="2*" MinHeight="170"/></Grid.RowDefinitions><DockPanel><StackPanel DockPanel.Dock="Top">
 <TextBlock x:Name="SubjectHeading" Text="Select or add a subject" FontSize="22" Margin="4,8"/>
 <WrapPanel><TextBox x:Name="SubjectName" Width="260" ToolTip="Selected subject name"/><Button x:Name="RenameSubject" Content="Rename subject"/><Button x:Name="RemoveSubject" Content="Remove subject"/></WrapPanel>
 <TextBlock x:Name="SubjectLockNotice" Margin="8" Foreground="#815A16" TextWrapping="Wrap"/>
 <WrapPanel><TextBox x:Name="ChannelUrl" Width="360" ToolTip="HTTPS YouTube channel URL"/><Button x:Name="AddChannel" Content="Add channel"/><Button x:Name="RemoveChannel" Content="Remove selected channel"/></WrapPanel>
 <TextBlock Text="Removing a subject preserves its captured videos and transcripts." Margin="8" TextWrapping="Wrap"/>
-</StackPanel><DataGrid x:Name="SubjectChannels" Margin="4,12,4,4"/></DockPanel>
+</StackPanel><DataGrid x:Name="SubjectChannels" Margin="4,12,4,4"/></DockPanel><GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch" Background="#D7DFEB"/><StackPanel Grid.Row="2"><TextBlock Text="Batch video imports" FontSize="22" Margin="4,0,4,8"/>
+<TextBlock Text="Paste one video URL per line. Downloads belong to the selected subject." Margin="4"/>
+<TextBox x:Name="VideoUrl" Height="80" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap" ToolTip="One HTTPS YouTube video URL per line"/>
+
+<WrapPanel><CheckBox x:Name="RefreshVideoTranscript" Content="Refresh saved transcripts" Margin="8" VerticalAlignment="Center"/><Button x:Name="ImportVideo" Content="Add URLs to queue"/><TextBlock x:Name="QueueAddNotice" Margin="8" VerticalAlignment="Center" TextWrapping="Wrap"/></WrapPanel>
+</StackPanel></Grid>
 </Grid></TabItem>
-<TabItem Header="Channels"><DockPanel Margin="12"><WrapPanel DockPanel.Dock="Top"><CheckBox x:Name="RefreshChannelTranscripts" Content="Refresh saved transcripts" Margin="8" VerticalAlignment="Center"/><Button x:Name="SyncSelected" Content="Sync selected channel"/><Button x:Name="SyncAll" Content="Sync all channels"/><Button x:Name="Refresh" Content="Refresh list"/><TextBlock Text="Captured transcripts are available in Corpus." VerticalAlignment="Center" Margin="12,0"/></WrapPanel><DataGrid x:Name="ChannelsGrid" Margin="4,12,4,4"/></DockPanel></TabItem>
+<TabItem Header="Channels"><Grid Margin="12"><Grid.ColumnDefinitions><ColumnDefinition Width="300" MinWidth="200"/><ColumnDefinition Width="8"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+<DockPanel Margin="4"><WrapPanel DockPanel.Dock="Top"><Button x:Name="SyncAll" Content="Queue all channels"/><Button x:Name="Refresh" Content="Refresh"/></WrapPanel><ListBox x:Name="ChannelsGrid" DisplayMemberPath="DisplayName" Padding="4" ScrollViewer.HorizontalScrollBarVisibility="Disabled"/></DockPanel>
+<GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Center" Background="#D7DFEB"/>
+<DockPanel Grid.Column="2" Margin="12,4"><StackPanel DockPanel.Dock="Top"><TextBlock x:Name="ChannelHeading" Text="Select a channel" FontSize="22" Margin="4,8" TextWrapping="Wrap"/><TextBlock x:Name="ChannelSyncStatus" Margin="4,8" TextWrapping="Wrap"/><WrapPanel><Button x:Name="SyncSelected" Content="Queue channel sync"/><Button x:Name="CancelSync" Content="Cancel sync"/><CheckBox x:Name="RefreshChannelTranscripts" Content="Refresh saved transcripts" Margin="8" VerticalAlignment="Center"/></WrapPanel></StackPanel>
+<DataGrid x:Name="ChannelDetails" AutoGenerateColumns="False" Margin="4,12"><DataGrid.Columns><DataGridTextColumn Header="Field" Binding="{Binding Field}" Width="190"/><DataGridTextColumn Header="Value" Binding="{Binding Value}" Width="*"/></DataGrid.Columns></DataGrid></DockPanel>
+</Grid></TabItem>
 <TabItem x:Name="QueueTab" Header="Video Queue"><DockPanel Margin="16">
 <StackPanel DockPanel.Dock="Top">
-<TextBlock Text="Batch video imports" FontSize="22" Margin="4,0,4,8"/>
-<TextBlock Text="Paste one YouTube video URL per line. Choose a subject, add the batch, then start the queue." Margin="4"/>
-<TextBox x:Name="VideoUrl" Height="100" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" TextWrapping="NoWrap" ToolTip="One HTTPS YouTube video URL per line"/>
-<WrapPanel><ComboBox x:Name="VideoSubject" DisplayMemberPath="name"/><Button x:Name="ClearVideoSubject" Content="Use no subject"/><TextBox x:Name="NewVideoSubject" Width="220" ToolTip="New subject name"/><Button x:Name="CreateVideoSubject" Content="Create and select subject"/></WrapPanel>
-<WrapPanel><CheckBox x:Name="RefreshVideoTranscript" Content="Refresh saved transcripts" Margin="8" VerticalAlignment="Center"/><Button x:Name="ImportVideo" Content="Add URLs to queue"/><TextBlock x:Name="QueueAddNotice" Margin="8" VerticalAlignment="Center" TextWrapping="Wrap"/></WrapPanel>
 <WrapPanel><Button x:Name="QueueStart" Content="Start / resume"/><Button x:Name="QueuePause" Content="Pause after current"/><Button x:Name="QueueCancel" Content="Cancel current and pause"/><Button x:Name="QueueRemove" Content="Remove pending item"/><Button x:Name="QueueRetry" Content="Retry selected"/><Button x:Name="QueueClear" Content="Clear finished"/></WrapPanel>
 <TextBlock x:Name="QueueStatus" Text="Queue paused" Margin="8" TextWrapping="Wrap"/>
 </StackPanel>

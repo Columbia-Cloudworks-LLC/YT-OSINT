@@ -9,9 +9,10 @@ Use Windows PowerShell 5.1 with ImportExcel and Pester 3.4 or 4.10.1:
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-ViewerIntegration.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-QueueIntegration.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-SubjectsIntegration.ps1
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-UnifiedQueueIntegration.ps1
 ```
 
-GitHub Actions runs syntax parsing, the fixture suite, and all three WPF scripts on Windows. Tests use `tests/fixtures/config.json`, not the user's live subject configuration. No YouTube requests are made by these checks.
+GitHub Actions runs syntax parsing, the fixture suite, and all four WPF scripts on Windows. Tests use `tests/fixtures/config.json`, not the user's live subject configuration. No YouTube requests are made by these checks.
 
 The fixture suite covers configuration and identity, atomic writes, concurrent subject updates, VTT normalization, subtitle selection, cached transcript reuse, searches, timestamp links, acquisition failures, members-only skips, Excel structure, run accounting, persistent rate-limit scheduling, dependency verification, rollback/recovery, and maintenance locks.
 
@@ -56,3 +57,9 @@ Do not run integrations that own dependency locks concurrently.
 - Disk exhaustion and process/power-loss injection at every persistence boundary.
 
 Local searches scan per-video JSON; there is no database index. Viewer rows are virtualized, but metadata lists, search results, queue history, and Excel exports still use memory proportional to their contents. Clear finished queue history and narrow searches when appropriate.
+
+## Unified scheduler verification
+
+Channel tests cover subject protection before discovery, duplicate job rejection, real nested-listing parsing without inline downloads, saved channel names, shared batch ownership, cancellation with an active item, serial channel jobs, failed discovery continuation, rate-limit pause, interrupted discovery recovery, legacy queue migration, and independent video retry after a failed sync.
+
+`Invoke-UnifiedQueueIntegration.ps1` drives the real Subjects, Channels, and Video Queue controls against an isolated fixture corpus. It verifies A–Z/Z–A sorting without changing selection, both channel label states, queueing another channel while downloading, subject-bound batch imports, duplicate suppression, selective cancellation, and eventual channel unlock. Acquisition is simulated; scheduling, persistence, locking, and UI workers are real. Run with `-ScreenshotDirectory .\docs\screenshots` to capture the three README screenshots without exposing personal configuration.
