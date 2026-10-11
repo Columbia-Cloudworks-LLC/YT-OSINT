@@ -27,8 +27,20 @@ function Show-CorpusSubjectPrompt {
     if($dialog.ShowDialog() -eq $true){return $nameBox.Text.Trim()}
     return $null
 }
+function Show-CorpusQueueConfirmation {
+    param($Owner,[string]$Title,[string]$Message,[scriptblock]$SmokeAction)
+    [xml]$layout=@"
+<Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Width="520" SizeToContent="Height" ResizeMode="NoResize" WindowStartupLocation="CenterOwner" FontFamily="Segoe UI" FontSize="14">
+<StackPanel Margin="20"><TextBlock x:Name="Message" TextWrapping="Wrap"/><StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0"><Button x:Name="CancelCleanup" Content="Keep queue" IsCancel="True" IsDefault="True" Padding="14,7" Margin="4"/><Button x:Name="ConfirmCleanup" Padding="14,7" Margin="4"/></StackPanel></StackPanel></Window>
+"@
+    $dialog=[Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($layout));$dialog.Owner=$Owner;$dialog.Title=$Title
+    $dialog.FindName('Message').Text=$Message;$dialog.FindName('ConfirmCleanup').Content=$Title
+    $dialog.FindName('ConfirmCleanup').Add_Click({$dialog.DialogResult=$true})
+    $dialog.Add_ContentRendered({$null=$dialog.FindName('CancelCleanup').Focus();if($SmokeAction){& $SmokeAction $dialog}})
+    return ($dialog.ShowDialog() -eq $true)
+}
 function Show-CorpusWindow {
-    param([string]$Root,[switch]$SkipDependencies,[switch]$SmokeTest,[string]$ScreenshotPath='',[switch]$SmokeCheckDependencies,[switch]$OpenDependencies,[switch]$SmokeCorpus,[scriptblock]$SmokeGridCheck,[scriptblock]$SmokeQueueCheck,[string]$SmokeQueueAdapter='',[scriptblock]$SmokeSubjectPrompt,[switch]$SmokeConfirmRemoval,[string]$UserSettingsPath=(Get-CorpusUserSettingsPath),[scriptblock]$SmokeWindowReady)
+    param([string]$Root,[switch]$SkipDependencies,[switch]$SmokeTest,[string]$ScreenshotPath='',[switch]$SmokeCheckDependencies,[switch]$OpenDependencies,[switch]$SmokeCorpus,[scriptblock]$SmokeGridCheck,[scriptblock]$SmokeQueueCheck,[string]$SmokeQueueAdapter='',[scriptblock]$SmokeSubjectPrompt,[switch]$SmokeConfirmRemoval,[string]$UserSettingsPath=(Get-CorpusUserSettingsPath),[scriptblock]$SmokeWindowReady,[scriptblock]$SmokeQueueConfirmation)
     $appRoot=Split-Path $PSScriptRoot -Parent
     Add-Type -AssemblyName PresentationFramework,PresentationCore,WindowsBase
     if(-not ('YouTubeCorpus.QueueView' -as [type])){Add-Type -Path (Join-Path $PSScriptRoot 'Corpus.QueueView.cs') -ReferencedAssemblies @('System','System.Core','System.Runtime.Serialization','System.Xml','System.Xaml','WindowsBase',[Windows.Controls.DataGrid].Assembly.Location,[Windows.Media.Brushes].Assembly.Location,[psobject].Assembly.Location)}
@@ -42,7 +54,7 @@ function Show-CorpusWindow {
         $ui[$name]=$window.FindName($name)
     }
     foreach($entry in @{OpenTranscript='Transcript';OpenResult='YouTube';OpenWorkbook='Excel';Build='Export';QueueToggle='Play';QueueRemove='Remove';QueueRetry='Retry';QueueClear='Broom';QueueClearAll='Clear';SyncSelected='Retry';SyncAll='Retry';CancelSync='Remove'}.GetEnumerator()){Set-CorpusButtonIcon $ui[$entry.Key] $entry.Value}
-    $state=@{Worker=$null;Handle=$null;Shared=$null;Operation='';Snapshot=$null;Ready=[bool]$SkipDependencies;Closing=$false;PendingSubject='';SmokeTicks=0;LastOutcome='Ready';CheckedStartup=(([bool]$SkipDependencies -or [bool]$SmokeTest) -and -not $SmokeCheckDependencies);RestartRequired=$false;RestartTicket=$null;DependencyRows=@();SmokeStage=0;ViewerVerified=$false;SmokeError='';QueueWorker=$null;QueueHandle=$null;QueueShared=$null;Queue=[pscustomobject]@{Paused=$true;Items=@();SyncJobs=@()};QueueStamp='';SelectCreatedSubject=$false;RestoringQueue=$false;QueueTicks=0;NeedsRefresh=$false;QueueReader=$null;QueueReadHandle=$null;QueueSnapshot=$null;QueueNext=$null;QueueReadRequested=$true;QueueInitialized=$false;QueueView=[YouTubeCorpus.QueueView]::new();QueueSelectionDirty=$true}
+    $state=@{Worker=$null;Handle=$null;Shared=$null;Operation='';Snapshot=$null;Ready=[bool]$SkipDependencies;Closing=$false;PendingSubject='';SmokeTicks=0;LastOutcome='Ready';CheckedStartup=(([bool]$SkipDependencies -or [bool]$SmokeTest) -and -not $SmokeCheckDependencies);RestartRequired=$false;RestartTicket=$null;DependencyRows=@();SmokeStage=0;ViewerVerified=$false;SmokeError='';CaptureStarted=$false;QueueWorker=$null;QueueHandle=$null;QueueShared=$null;Queue=[pscustomobject]@{Paused=$true;Items=@();SyncJobs=@()};QueueStamp='';SelectCreatedSubject=$false;RestoringQueue=$false;QueueTicks=0;NeedsRefresh=$false;QueueReader=$null;QueueReadHandle=$null;QueueSnapshot=$null;QueueNext=$null;QueueReadRequested=$true;QueueInitialized=$false;QueueView=[YouTubeCorpus.QueueView]::new();QueueSelectionDirty=$true}
     $ui.QueueGrid.ItemsSource=$state.QueueView.Rows
     $ui.QueueGrid.SortColumn(@($ui.QueueGrid.Columns | Where-Object SortMemberPath -eq QueueOrder)[0])
     $artwork=Join-Path $appRoot 'docs/yt-osint-header-bg.png'
@@ -53,7 +65,7 @@ function Show-CorpusWindow {
     $ui.AboutVersion.Text='Version '+(Get-Content (Join-Path $appRoot 'VERSION') -Raw).Trim()+' · Windows desktop'
     $ui.AboutRepository.Add_Click({Start-Process 'https://github.com/Columbia-Cloudworks-LLC/YT-OSINT'})
     $state.CleanupTasks=[Collections.Generic.List[Threading.Tasks.Task]]::new()
-    $mutators=@('CreateSubject','RemoveSubject','RenameSubject','AddChannel','RemoveChannel','SyncSelected','SyncAll','Refresh','CancelSync','ImportVideo','Build','Search','FilterCorpus','RefreshChannelTranscripts','RefreshVideoTranscript','OpenTranscript','AutoExport','QueueToggle','QueueUp','QueueDown','QueueRemove','QueueRetry','QueueClear','QueueClearAll')
+    $mutators=@('CreateSubject','RemoveSubject','RenameSubject','AddChannel','RemoveChannel','SyncSelected','SyncAll','Refresh','CancelSync','ImportVideo','Build','Search','ClearFilters','RefreshChannelTranscripts','RefreshVideoTranscript','OpenTranscript','AutoExport','QueueToggle','QueueUp','QueueDown','QueueRemove','QueueRetry','QueueClear','QueueClearHistory','QueueClearAll')
     $ui.Paths.Text="Current corpus folder: $Root`nWorkbook: $(Join-Path $Root 'output/YouTubeCorpus.xlsx')`nSource configuration: $(Join-Path $Root 'config.json')`nNative dependencies: $(Get-CorpusNativeRoot)"
     $state.Preferences=Get-CorpusUserSettings $UserSettingsPath
     $state.RestartRoot=$Root
@@ -87,12 +99,13 @@ function Show-CorpusWindow {
         $ui.SyncSelected.IsEnabled=($available -and [bool]$c -and -not $active)
         $ui.CancelSync.IsEnabled=($available -and $active -and $job.Status -ne 'Cancelling')
         $ui.ChannelHeading.Text=if($c){$c.DisplayName}else{'Select a channel'}
-        $ui.ChannelSyncStatus.Text=if($job){
+        if($c){
             $indicator=Get-CorpusChannelIndicator $c $job $state.Queue $state.Preferences.StaleDays
-            "$($indicator.Label) - $(if($job.Status -eq 'Downloading'){$counts=$state.QueueSnapshot.Job($job.Id);"$($counts.Pending) pending; $($counts.Running) active"}else{$job.Detail})"
-        }else{'Queue a sync to discover videos and download their transcripts.'}
-
-        $ui.ChannelDetails.ItemsSource=@(if($c){foreach($field in @('Subject','ChannelName','ChannelId','Url','VideosDiscovered','WithTranscripts','WithoutTranscripts','LastSuccessfulSync','LastAttempt','Status')){[pscustomobject]@{Field=($field -creplace '([a-z])([A-Z])','$1 $2');Value=$c.$field}}})
+            $ui.ChannelSyncStatus.Text='Queue activity: '+$indicator.Activity
+            $ui.ChannelLastResult.Text='Latest sync: '+$indicator.Result
+            $ui.ChannelFreshness.Text='Freshness: '+$indicator.FreshnessText
+        }else{$ui.ChannelSyncStatus.Text='Select a channel to view its sync status.';$ui.ChannelLastResult.Text='';$ui.ChannelFreshness.Text=''}
+        $ui.ChannelDetails.ItemsSource=@(if($c){foreach($field in @('Subject','ChannelName','ChannelId','Url','VideosDiscovered','WithTranscripts','WithoutTranscripts','LastSuccessfulSync','LastAttempt')){[pscustomobject]@{Field=($field -creplace '([a-z])([A-Z])','$1 $2');Value=$c.$field}}})
     }
     function Update-SubjectLock {
         $selected=$ui.SubjectPick.SelectedItem
@@ -111,6 +124,7 @@ function Show-CorpusWindow {
         $selected=$ui.QueueGrid.SelectedItem
         $pendingSelected=[YouTubeCorpus.QueueView]::PendingSelected($ui.QueueGrid.SelectedItems)
         $ui.QueueSelection.Text="$($ui.QueueGrid.SelectedItems.Count) selected · $pendingSelected pending"
+        $ui.QueueSelectedActions.Visibility=if($ui.QueueGrid.SelectedItems.Count){'Visible'}else{'Collapsed'}
         $canMove=$available -and $ui.QueueGrid.SelectedItems.Count -eq 1 -and $pendingSelected -eq 1
         $ui.QueueUp.IsEnabled=$canMove;$ui.QueueDown.IsEnabled=$canMove
         $ui.QueueRemove.IsEnabled=($available -and $pendingSelected -gt 0)
@@ -118,14 +132,14 @@ function Show-CorpusWindow {
         $ui.QueueReview.IsEnabled=($available -and -not $state.QueueWorker)
         $ui.QueueRetry.IsEnabled=($available -and $ui.QueueGrid.SelectedItems.Count -eq 1 -and $selected -and $selected.Status -in @('Failed','Cancelled'))
         $counts=if($state.QueueSnapshot){$state.QueueSnapshot.Counts}else{[YouTubeCorpus.QueueCounts]::new()}
-        $ui.QueueClear.IsEnabled=($available -and $counts.Finished -gt 0)
+        $ui.QueueClear.IsEnabled=($available -and ($counts.Finished - $counts.Failed - $counts.Cancelled) -gt 0);$ui.QueueClearHistory.IsEnabled=($available -and $counts.Finished -gt 0)
         $ui.QueueClearAll.IsEnabled=($available -and ($counts.Pending + $counts.Finished -gt 0 -or @($state.Queue.SyncJobs | Where-Object Status -in @('Pending','Discovering')).Count -gt 0))
         $processing=[bool]$state.QueueWorker -or $counts.Running -gt 0 -or @($state.Queue.SyncJobs | Where-Object Status -eq Discovering).Count -gt 0
         $pausing=$processing -and $state.Queue.Paused
         $running=$processing -or -not $state.Queue.Paused
-        $label=if($pausing){'Pausing…'}elseif($running){'Pause'}else{'Start'}
+        $label=if($pausing){'Pausing…'}elseif($running){'Pause'}elseif(@($state.Queue.SyncJobs | Where-Object Status -in @('Pending','Discovering')).Count){if($ui.QueueReview.IsChecked){'List channel videos'}else{'List and capture videos'}}elseif((Get-CorpusProperty $state.Queue AwaitingReview $false) -or ($counts.Finished -eq 0 -and -not $state.CaptureStarted)){'Capture queued videos'}else{'Resume capture'}
         if([Windows.Automation.AutomationProperties]::GetName($ui.QueueToggle) -ne $label){Set-CorpusButtonIcon $ui.QueueToggle $(if($running){'Pause'}else{'Play'}) -Label $label}
-        $ui.QueueToggle.ToolTip=if($running){'Pause the entire queue after the active discovery or download finishes safely.'}else{'Start the entire queue. List every queued channel before downloading videos.'}
+        $ui.QueueToggle.ToolTip=if($running){'Pause the entire queue after the active discovery or download finishes safely.'}elseif($label -eq 'List channel videos'){'List every queued channel, then pause for review before capture.'}elseif($label -eq 'List and capture videos'){'List every queued channel, then capture its videos without a review pause.'}else{'Capture pending videos in queue order.'}
         $hasWork=($counts.Pending + @($state.Queue.SyncJobs | Where-Object Status -eq Pending).Count) -gt 0
         $ui.QueueToggle.IsEnabled=($commandAvailable -and -not $pausing -and ($running -or ($hasWork -and -not $state.QueueView.IsApplying)))
 
@@ -141,7 +155,7 @@ function Show-CorpusWindow {
         $state.QueueInitialized=$true
         $summary=$state.QueueSnapshot.Progress
         $ui.QueueStatus.Text=$summary.Text;$ui.QueueProgress.Maximum=$summary.Maximum;$ui.QueueProgress.Value=$summary.Value
-        $ui.QueueActivity.Text=if($summary.WaitingChannels){'Video totals are still growing during discovery. No video download starts until all queued channels are resolved.'}elseif(-not $state.Queue.Items.Count){'Add video URLs in Subjects or queue a channel to get started.'}elseif($summary.Phase -eq 'Queue complete'){'All visible videos have finished. Clear finished removes history, not captured files.'}elseif($summary.Phase -eq 'Review discovered videos'){'Discovery finished. Sort by Est. Publish Date, select and remove older pending videos, then press Start to capture the rest.'}elseif($state.Queue.Paused){'Ready when you are. Start continues pending work; captured files are preserved.'}else{'All queued channels are listed. Processing videos sequentially.'}
+        $ui.QueueActivity.Text=if($summary.WaitingChannels){'Video totals are still growing during discovery. No video download starts until all queued channels are resolved.'}elseif(-not $state.Queue.Items.Count){'Add video URLs in Subjects or queue a channel to get started.'}elseif($summary.Phase -eq 'Queue complete'){'All visible videos have finished. Clear successful history keeps failed and cancelled items available to retry.'}elseif($summary.Phase -eq 'Review discovered videos'){'Ready for review. Sort by Est. Publish Date, select and remove older pending videos, then choose Capture queued videos.'}elseif($state.Queue.Paused){'Capture continues pending work; captured files are preserved.'}else{'All queued channels are listed. Processing videos sequentially.'}
 
         Update-StatusIndicators;Update-SubjectLock;Update-QueueButtons;Show-ChannelDetails
     }
@@ -185,7 +199,7 @@ function Show-CorpusWindow {
         if($Operation -in @('SyncAll','SyncChannel','Video')){$Arguments.SkipWorkbook=(-not [bool]$ui.AutoExport.IsChecked)}
         if($Operation -eq 'Search'){$state.SearchText=$Arguments.Text}
         if($Operation -eq 'Subject'){$state.SelectCreatedSubject=(-not $Arguments.Id)}
-        if($Operation -eq 'QueueAdd'){$state.QueuedInput=$Arguments.Text}
+        if($Operation -eq 'QueueAdd'){$state.QueuedInput=$Arguments.Text;$state.QueuedSubjectName=[string](@($state.Snapshot.Config.subjects | Where-Object id -eq $Arguments.SubjectId)[0].name);$ui.OpenQueueFromSubjects.Visibility='Collapsed'};if($Operation -eq 'SyncAdd'){$ui.OpenQueueFromChannels.Visibility='Collapsed';$ui.ChannelQueueNotice.Text='Queueing channels...'}
         $state.Operation=$Operation;$state.Shared=[hashtable]::Synchronized(@{Cancel=$false;CommitInProgress=$false;DependenciesChanged=$false;Progress=$null;Messages=[Collections.Concurrent.ConcurrentQueue[string]]::new()})
         $ps=[powershell]::Create()
         $null=$ps.AddScript({param($root,$op,$argsMap,$shared,$codeRoot)
@@ -226,7 +240,7 @@ function Show-CorpusWindow {
             } else {Invoke-CorpusOperation $root $op $argsMap $shared}
         }).AddArgument($Root).AddArgument($Operation).AddArgument($Arguments).AddArgument($state.Shared).AddArgument($appRoot)
         $state.Worker=$ps;$state.Handle=$ps.BeginInvoke();Set-Busy $true
-        $ui.Status.Text=$Operation;$ui.Progress.IsIndeterminate=$true
+        $ui.Status.Text=switch($Operation){'Filter' {'Searching video details'}'Search' {'Searching transcripts'}'QueueAction' {'Updating queue'}'SyncAdd' {'Queueing channels'}'QueueAdd' {'Queueing videos'}'Refresh' {'Refreshing saved data'}default {$Operation}};$ui.Progress.IsIndeterminate=$true
     }
     function Show-SubjectChannels {
         $previousUrl=if($ui.SubjectChannels.SelectedItem){$ui.SubjectChannels.SelectedItem.Url}else{''}
@@ -240,7 +254,8 @@ function Show-CorpusWindow {
         foreach($row in $ui.ChannelsGrid.Items){
             $job=$state.Queue.SyncJobs | Where-Object {$_.Url -eq $row.Url -or ($row.ChannelId -and $_.ChannelId -eq $row.ChannelId)} | Select-Object -Last 1
             $indicator=Get-CorpusChannelIndicator $row $job $state.Queue $state.Preferences.StaleDays
-            $row | Add-Member NoteProperty StatusLabel $indicator.Label -Force
+            $freshnessLabel=if($indicator.Freshness -eq 'Up to date'){'Recent'}else{$indicator.Freshness}
+            $row | Add-Member NoteProperty StatusLabel ("Queue: $($indicator.Activity)`nLatest sync: $($indicator.Result)`nFreshness: $freshnessLabel") -Force
             $row | Add-Member NoteProperty StatusHint $indicator.Hint -Force
             $row | Add-Member NoteProperty Freshness $indicator.Freshness -Force
         }
@@ -287,7 +302,7 @@ function Show-CorpusWindow {
         foreach($row in $ui.ChannelsGrid.Items){if($row.Url -eq $selectedUrl){$ui.ChannelsGrid.SelectedItem=$row;break}}
         if(-not $ui.ChannelsGrid.SelectedItem -and $channelRows.Count){$ui.ChannelsGrid.SelectedIndex=0}
         Update-StatusIndicators;Show-ChannelDetails
-        $ui.CorpusGrid.ItemsSource=@($Snapshot.Videos | Select-Object SubjectName,ChannelName,VideoTitle,VideoId,PublishedDate,Duration,TranscriptAvailable,SubtitleSource,LastSyncStatus,VideoUrl)
+        if($ui.CorpusGrid.Visibility -eq 'Visible'){$ui.AppliedSearch.Text='Showing: all saved videos (refreshed)'};$ui.CorpusGrid.ItemsSource=@($Snapshot.Videos | Select-Object SubjectName,ChannelName,VideoTitle,VideoId,PublishedDate,Duration,TranscriptAvailable,SubtitleSource,LastSyncStatus,VideoUrl)
         Show-SubjectChannels
         if($ui.SubjectPick.SelectedItem -and $ui.SubjectPick.SelectedItem.id -eq $subjectId -and -not $state.SelectCreatedSubject -and $subjectDraft -ne $oldSubjectName){$ui.SubjectName.Text=$subjectDraft}
         $state.SelectCreatedSubject=$false
@@ -346,13 +361,14 @@ function Show-CorpusWindow {
             Invoke-CorpusQueue $root $shared -ReviewAfterDiscovery:([bool]$shared.ReviewAfterDiscovery)
         }).AddArgument($Root).AddArgument($state.QueueShared).AddArgument($appRoot).AddArgument($(if($SmokeTest){$SmokeQueueAdapter}else{''}))
         $state.QueueShared.ReviewAfterDiscovery=[bool]$ui.QueueReview.IsChecked
-        $state.QueueWorker=$ps;$state.QueueHandle=$ps.BeginInvoke();$state.Queue.Paused=$false;Set-Busy $false
+        $state.CaptureStarted=$true;$state.QueueWorker=$ps;$state.QueueHandle=$ps.BeginInvoke();$state.Queue.Paused=$false;Set-Busy $false
     }
     $ui.QueueGrid.Add_SelectionChanged({$state.QueueSelectionDirty=$true;if(-not $state.RestoringQueue){Update-QueueButtons}})
     $ui.QueueToggle.Add_Click({
         if($state.QueueWorker -or -not $state.Queue.Paused){Start-Work 'QueueAction' @{Action='Pause';Id=''}}else{Start-QueueWork}
     })
     $ui.QueueRemove.Add_Click({$ids=[YouTubeCorpus.QueueView]::SelectedIds($ui.QueueGrid.SelectedItems);if($ids.Count){Start-Work 'QueueRemove' @{Ids=$ids}}})
+    $ui.QueueReview.Add_Checked({Update-QueueButtons});$ui.QueueReview.Add_Unchecked({Update-QueueButtons})
     $ui.QueueBefore.Add_SelectedDateChanged({Update-QueueButtons})
     $ui.QueueSelectBefore.Add_Click({
         if(-not $ui.QueueBefore.SelectedDate -or $state.QueueView.IsApplying){return}
@@ -363,16 +379,64 @@ function Show-CorpusWindow {
     $ui.QueueUp.Add_Click({if($ui.QueueGrid.SelectedItem){Start-Work 'QueueAction' @{Action='MoveUp';Id=$ui.QueueGrid.SelectedItem.Id}}})
     $ui.QueueDown.Add_Click({if($ui.QueueGrid.SelectedItem){Start-Work 'QueueAction' @{Action='MoveDown';Id=$ui.QueueGrid.SelectedItem.Id}}})
     $ui.QueueRetry.Add_Click({if($ui.QueueGrid.SelectedItem){Start-Work 'QueueAction' @{Action='Retry';Id=$ui.QueueGrid.SelectedItem.Id}}})
-    $ui.QueueClear.Add_Click({Start-Work 'QueueAction' @{Action='ClearFinished';Id=''}})
-    $ui.QueueClearAll.Add_Click({Start-Work 'QueueAction' @{Action='ClearQueue';Id='';RunnerShared=$state.QueueShared}})
+    $ui.QueueClear.Add_Click({Start-Work 'QueueAction' @{Action='ClearSuccessful';Id=''}})
+    $ui.QueueClearHistory.Add_Click({Confirm-QueueCleanup 'ClearFinished'})
+    $ui.QueueClearAll.Add_Click({Confirm-QueueCleanup 'ClearQueue'})
+    $ui.OpenQueueFromSubjects.Add_Click({$ui.QueueTab.IsSelected=$true;$null=$ui.QueueToggle.Focus()})
+    $ui.OpenQueueFromChannels.Add_Click({$ui.QueueTab.IsSelected=$true;$null=$ui.QueueToggle.Focus()})
+    function Confirm-QueueCleanup([string]$Action) {
+        $counts=$state.QueueSnapshot.Counts
+        $title=if($Action -eq 'ClearQueue'){'Clear queue'}else{'Clear all history'}
+        $message=if($Action -eq 'ClearQueue'){
+            $channels=@($state.Queue.SyncJobs | Where-Object Status -in @('Pending','Discovering')).Count
+            "Remove $($counts.Pending) pending videos and $($counts.Finished) history rows, and cancel $channels queued or active channel listings?`n`nThe queue will pause. The current download may finish. Captured videos and transcripts are kept."
+        }else{"Remove $($counts.Finished) finished rows, including $($counts.Failed) failed and $($counts.Cancelled) cancelled items?`n`nThese rows will no longer be available to retry. Pending work and captured videos and transcripts are kept."}
+        $hook=if($SmokeTest){$SmokeQueueConfirmation}else{$null}
+        if(Show-CorpusQueueConfirmation $window $title $message $hook){Start-Work 'QueueAction' @{Action=$Action;Id='';RunnerShared=$state.QueueShared}}
+    }
     $ui.Build.Add_Click({Start-Work 'Build'})
     function Get-CorpusFilters {
         $s=$ui.SearchSubject.SelectedItem
         return @{Text=$ui.Query.Text;Subject=$(if($s){$s.id}else{''});Channel=$ui.SearchChannel.Text;Video=$ui.SearchVideo.Text;From=$(if($ui.DateFrom.SelectedDate){$ui.DateFrom.SelectedDate.ToString('yyyy-MM-dd')}else{''});To=$(if($ui.DateTo.SelectedDate){$ui.DateTo.SelectedDate.ToString('yyyy-MM-dd')}else{''})}
     }
-    $ui.FilterCorpus.Add_Click({Start-Work 'Filter' (Get-CorpusFilters)})
+    function Update-SearchSummary {
+        $parts=[Collections.Generic.List[string]]::new()
+        if($ui.SearchSubject.SelectedItem){$parts.Add('Subject: '+$ui.SearchSubject.SelectedItem.DisplayName)}
+        if($ui.SearchChannel.Text.Trim()){$parts.Add('Channel: '+$ui.SearchChannel.Text.Trim())}
+        if($ui.SearchVideo.Text.Trim()){$parts.Add('Video: '+$ui.SearchVideo.Text.Trim())}
+        if($ui.DateFrom.SelectedDate){$parts.Add('From '+$ui.DateFrom.SelectedDate.ToString('yyyy-MM-dd'))}
+        if($ui.DateTo.SelectedDate){$parts.Add('Through '+$ui.DateTo.SelectedDate.ToString('yyyy-MM-dd'))}
+        $ui.ActiveFilters.Text=if($parts.Count){'Next search filters: '+($parts -join '; ')}else{'Next search filters: none'}
+    }
+    function Invoke-UiSearch {
+        if(-not $ui.Search.IsEnabled){return}
+        if($ui.DateFrom.SelectedDate -and $ui.DateTo.SelectedDate -and $ui.DateFrom.SelectedDate -gt $ui.DateTo.SelectedDate){$ui.CorpusNotice.Text='The start date must be on or before the end date.';return}
+        $mode=if($ui.SearchMode.SelectedIndex -eq 1){'Search'}else{'Filter'}
+        if($mode -eq 'Search' -and [string]::IsNullOrWhiteSpace($ui.Query.Text)){$ui.CorpusNotice.Text='Enter text to search transcripts.';$null=$ui.Query.Focus();return}
+        $state.SubmittedSearch="$($ui.SearchMode.SelectedItem.Content)$(if($ui.Query.Text){' containing '+$ui.Query.Text}) - $($ui.ActiveFilters.Text.Replace('Next search filters: ','filters: '))"
+        $ui.CorpusNotice.Text='Searching...'
+        Start-Work $mode (Get-CorpusFilters)
+    }
+    $ui.Search.Add_Click({Invoke-UiSearch})
+    $ui.Query.Add_KeyDown({param($sender,$e) if($e.Key -eq 'Return'){$e.Handled=$true;Invoke-UiSearch}})
     $ui.ClearSearchSubject.Add_Click({$ui.SearchSubject.SelectedIndex=-1})
-    $ui.Search.Add_Click({if([string]::IsNullOrWhiteSpace($ui.Query.Text)){Show-UiError 'Enter text to search the transcripts.';return};Start-Work 'Search' (Get-CorpusFilters)})
+    $ui.ClearFilters.Add_Click({$ui.SearchSubject.SelectedIndex=-1;$ui.SearchChannel.Clear();$ui.SearchVideo.Clear();$ui.DateFrom.SelectedDate=$null;$ui.DateTo.SelectedDate=$null;Update-SearchSummary;Invoke-UiSearch})
+    $ui.SearchSubject.Add_SelectionChanged({Update-SearchSummary})
+    $ui.SearchChannel.Add_TextChanged({Update-SearchSummary});$ui.SearchVideo.Add_TextChanged({Update-SearchSummary})
+    $ui.DateFrom.Add_SelectedDateChanged({Update-SearchSummary});$ui.DateTo.Add_SelectedDateChanged({Update-SearchSummary})
+    Update-SearchSummary
+    $window.Add_PreviewKeyDown({param($sender,$e) if($e.Key -eq 'F' -and ([Windows.Input.Keyboard]::Modifiers -band [Windows.Input.ModifierKeys]::Control)){$ui.CorpusTab.IsSelected=$true;$null=$ui.Query.Focus();$ui.Query.SelectAll();$e.Handled=$true}})
+    function Update-CompactLayout {
+        $layoutHeight=$window.ActualHeight/[math]::Max(1,$window.Content.LayoutTransform.Value.M22)
+        $compact=$layoutHeight -lt 800
+        $ui.QueueControlsScroll.MaxHeight=[math]::Max(100,$layoutHeight-460)
+        $ui.CorpusControlsScroll.MaxHeight=[math]::Max(160,$layoutHeight-400)
+        $ui.QueueHint.Visibility=if($compact){'Collapsed'}else{'Visible'}
+        $ui.BrandHeader.Height=if($compact){64}else{104}
+        $ui.HeaderTagline.Visibility=if($compact){'Collapsed'}else{'Visible'}
+        $ui.HeaderText.Margin=if($compact){[Windows.Thickness]::new(12)}else{[Windows.Thickness]::new(20)}
+    }
+    $window.Add_SizeChanged({Update-CompactLayout})
     $readTranscript={
         $isSearch=$ui.SearchGrid.Visibility -eq 'Visible'
         $row=if($isSearch){$ui.SearchGrid.SelectedItem}else{$ui.CorpusGrid.SelectedItem}
@@ -382,6 +446,8 @@ function Show-CorpusWindow {
     # WPF disables auto-generated columns for PowerShell's dynamic property types.
     $ui.CorpusGrid.Add_AutoGeneratingColumn({param($sender,$eventArgs) $eventArgs.Column.CanUserSort=$true})
     $ui.OpenTranscript.Add_Click($readTranscript)
+    $openWithKeyboard={param($sender,$e) if($e.Key -eq 'Return' -and $sender.SelectedItem){$e.Handled=$true;& $readTranscript}}
+    $ui.CorpusGrid.Add_KeyDown($openWithKeyboard);$ui.SearchGrid.Add_KeyDown($openWithKeyboard)
     $openTranscriptRow={
         param($sender,$eventArgs)
         # The grid also receives double-clicks from column headers, scrollbars and empty space.
@@ -401,6 +467,8 @@ function Show-CorpusWindow {
     $timer=[Windows.Threading.DispatcherTimer]::new();$timer.Interval=[timespan]::FromMilliseconds(200)
     $timer.Add_Tick({
         $state.QueueTicks++
+        $globalQueue=if($state.QueueWorker){if($state.Queue.Paused){'Pausing after the current item'}elseif($state.QueueShared.Progress){[string]$state.QueueShared.Progress.Stage}else{'Starting'}}elseif($state.QueueSnapshot){$state.QueueSnapshot.Progress.Text}else{'Loading'}
+        $ui.GlobalQueueStatus.Text='Queue: '+$globalQueue
         if($state.QueueTicks % 300 -eq 0){Update-StatusIndicators}
         if($state.QueueTicks % 5 -eq 0 -or $state.QueueReadRequested){Read-QueueView}
         if($state.QueueSelectionDirty -and -not $state.QueueView.IsApplying){$state.QueueSelectionDirty=$false;Update-QueueButtons}
@@ -425,8 +493,8 @@ function Show-CorpusWindow {
         if($SmokeCorpus -and -not $state.Worker -and $state.Snapshot -and $state.SmokeStage -lt 3){
             try {
                 switch($state.SmokeStage){
-                    0 {if($SmokeGridCheck){$ui.Tabs.SelectedIndex=3;$window.UpdateLayout();& $SmokeGridCheck $ui.CorpusGrid;if($state.Worker){throw 'A non-row double-click opened a transcript.'}};$ui.Query.Text='test';$ui.FilterCorpus.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent));$state.SmokeStage=1}
-                    1 {if($ui.CorpusGrid.Items.Count -ne 1){throw 'Corpus metadata filter failed.'};$ui.Search.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent));$state.SmokeStage=2}
+                    0 {if($SmokeGridCheck){$ui.Tabs.SelectedIndex=3;$window.UpdateLayout();& $SmokeGridCheck $ui.CorpusGrid;if($state.Worker){throw 'A non-row double-click opened a transcript.'}};$ui.Query.Text='test';$ui.SearchMode.SelectedIndex=0;$ui.Search.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent));$state.SmokeStage=1}
+                    1 {if($ui.CorpusGrid.Items.Count -ne 1){throw 'Corpus metadata filter failed.'};$ui.SearchMode.SelectedIndex=1;$ui.Search.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent));$state.SmokeStage=2}
                     2 {if($ui.SearchGrid.Items.Count -ne 2 -or $ui.SearchGrid.Visibility -ne 'Visible'){throw 'Integrated transcript search failed.'};if($SmokeGridCheck){$window.UpdateLayout();& $SmokeGridCheck $ui.SearchGrid;if($state.Worker){throw 'A search header opened a transcript.'}}
                         $ui.SearchGrid.SelectedIndex=0;$ui.SearchGrid.UpdateLayout()
                         $row=$ui.SearchGrid.ItemContainerGenerator.ContainerFromIndex(0)
@@ -464,10 +532,10 @@ function Show-CorpusWindow {
                     'UpdateDependencies' {$ui.Status.Text='Updates complete. Restarting YT-OSINT…'}
                     'RecoverDependencies' {$ui.Status.Text='Recovery complete. Restarting YT-OSINT…'}
                     'Refresh' {if($result.Count){Set-Snapshot $result[-1]}}
-                    'Search' {$ui.SearchGrid.ItemsSource=$result;$ui.CorpusGrid.Visibility='Collapsed';$ui.SearchGrid.Visibility='Visible';$ui.CorpusNotice.Text="$($result.Count) matching segments. Double-click a result to read its transcript.";$ui.Status.Text="$($result.Count) matches"}
+                    'Search' {$ui.AppliedSearch.Text='Showing: '+$state.SubmittedSearch;$ui.SearchGrid.ItemsSource=$result;$ui.CorpusGrid.Visibility='Collapsed';$ui.SearchGrid.Visibility='Visible';$ui.CorpusNotice.Text="$($result.Count) matching segments. Double-click a result to read its transcript.";$ui.Status.Text="$($result.Count) matches"}
                     'Transcript' {if($result.Count){$viewerData=$result[-1]}}
                     'Subject' {if($state.SelectCreatedSubject -and $result.Count){$state.PendingSubjectId=[string]$result[-1]}}
-                    'QueueAdd' {if($result.Count){$ui.QueueAddNotice.Text="$($result[-1].Added) added; $($result[-1].Duplicates) duplicates skipped";if($ui.VideoUrl.Text -eq $state.QueuedInput){$ui.VideoUrl.Clear()}};Refresh-QueueView}
+                    'QueueAdd' {if($result.Count){$ui.QueueAddNotice.Text="$($result[-1].Added) videos queued for $($state.QueuedSubjectName); $($result[-1].Duplicates) duplicates skipped";$ui.Status.Text=$ui.QueueAddNotice.Text;$ui.OpenQueueFromSubjects.Visibility='Visible';if($ui.VideoUrl.Text -eq $state.QueuedInput){$ui.VideoUrl.Clear()}};Refresh-QueueView}
                     'QueueAction' {Refresh-QueueView}
                     'QueueRemove' {Refresh-QueueView;if($result.Count){$ui.Status.Text="$($result[-1].Removed) pending items removed; $($result[-1].Skipped) skipped. Captured files preserved."}}
                     'Storage' {
@@ -476,11 +544,12 @@ function Show-CorpusWindow {
                         else{$ui.StorageNotice.Text='Settings saved to your Windows profile.'}
                         $ui.Status.Text=$ui.StorageNotice.Text;Update-StatusIndicators
                     }
-                    'SyncAdd' {Refresh-QueueView;$ui.Status.Text='Channel sync queued. Use Video Queue to start or resume.'}
+                    'SyncAdd' {Refresh-QueueView;$ui.ChannelQueueNotice.Text='Channels queued. Open the queue to list their videos.';$ui.OpenQueueFromChannels.Visibility='Visible';$ui.Status.Text='Channel sync queued.'}
                     'SyncCancel' {Refresh-QueueView}
-                    'Filter' {$ui.CorpusGrid.ItemsSource=$result;$ui.CorpusGrid.Visibility='Visible';$ui.SearchGrid.Visibility='Collapsed';$ui.CorpusNotice.Text="$($result.Count) videos. Double-click a row to read its transcript."}
+                    'Filter' {$ui.AppliedSearch.Text='Showing: '+$state.SubmittedSearch;$ui.CorpusGrid.ItemsSource=$result;$ui.CorpusGrid.Visibility='Visible';$ui.SearchGrid.Visibility='Collapsed';$ui.CorpusNotice.Text="$($result.Count) videos. Double-click a row to read its transcript.";$ui.Status.Text="$($result.Count) videos found"}
                     default {if($result.Count -and $result[-1].PSObject.Properties['FinalState']){$ui.Status.Text="$($result[-1].FinalState): $($result[-1].VideosDiscovered) discovered; $($result[-1].TranscriptsAdded) transcripts added; $($result[-1].TranscriptsUnavailable) unavailable; $($result[-1].Failures) failures; $(Get-CorpusProperty $result[-1] MembersOnlySkipped 0) members-only skipped"}}
                 }
+                if($op -in @('Search','Filter') -and -not $result.Count){$ui.CorpusNotice.Text='No matches. Try different text or clear the filters.'}
             }catch{$failed=$true;$state.WorkerError=$_.Exception.GetBaseException().Message;$ui.Status.Text=if($state.Shared.Cancel){'Cancelled; completed work preserved.'}elseif(Test-CorpusRateLimitError $_.Exception){'YouTube rate limit - sync stopped. Wait at least 8 minutes before retrying.'}else{'Operation failed; see Logs / Status.'};$ui.LogText.AppendText($_.Exception.GetBaseException().Message+"`r`n");if($op -eq 'Storage'){$ui.StorageNotice.Text='Settings were not saved: '+$_.Exception.GetBaseException().Message};if($op -eq 'QueueAdd'){$ui.QueueAddNotice.Text=$_.Exception.GetBaseException().Message}}
             finally{if($op -in @('UpdateDependencies','RecoverDependencies')){$state.RestartRequired=(-not $failed -or [bool]$state.Shared.DependenciesChanged);$ui.DependencyNotice.Text=if($failed){'Update did not complete. See Logs / Status for details.'}else{'Updates complete. Restarting YT-OSINT…'}};if($op -ne 'Refresh'){$state.LastOutcome=$ui.Status.Text};$state.CleanupTasks.Add([YouTubeCorpus.QueueView]::DisposeWorkerAsync($state.Worker));$state.Worker=$null;$state.Handle=$null;$ui.Progress.IsIndeterminate=$false;$ui.Progress.Value=0;Set-Busy $false}
             if($state.Closing){$window.Close();return}

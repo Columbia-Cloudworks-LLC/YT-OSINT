@@ -248,7 +248,8 @@ namespace YouTubeCorpus
         public int Running { get; internal set; }
         public int Finished { get; internal set; }
         public int Failed { get; internal set; }
-        internal void Add(string status) { if (status == "Pending") Pending++; else if (status == "Running") Running++; else Finished++; if (status == "Failed") Failed++; }
+        public int Cancelled { get; internal set; }
+        internal void Add(string status) { if (status == "Pending") Pending++; else if (status == "Running") Running++; else Finished++; if (status == "Failed") Failed++; if (status == "Cancelled") Cancelled++; }
     }
 
     public sealed class QueueSnapshot

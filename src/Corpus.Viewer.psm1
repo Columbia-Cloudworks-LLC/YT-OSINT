@@ -25,7 +25,7 @@ function Show-CorpusTranscriptWindow {
 <StackPanel DockPanel.Dock="Top">
 <TextBlock x:Name="VideoTitle" FontSize="22" FontWeight="SemiBold" TextWrapping="Wrap"/>
 <TextBlock x:Name="VideoDetail" Foreground="#526075" Margin="0,6,0,18" TextWrapping="Wrap"/>
-<Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBox x:Name="FindText" Padding="9" VerticalContentAlignment="Center" ToolTip="Find literal text within each timestamped segment (case insensitive)"/><Button x:Name="Previous" Grid.Column="1" Content="Previous match"/><Button x:Name="Next" Grid.Column="2" Content="Next match"/></Grid>
+<Label Content="Find in this transcript" Target="{Binding ElementName=FindText}"/><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions><TextBox AutomationProperties.Name="Find in this transcript" x:Name="FindText" Padding="9" VerticalContentAlignment="Center" ToolTip="Find literal text within each timestamped segment (case insensitive)"/><Button x:Name="Previous" Grid.Column="1" Content="Previous match"/><Button x:Name="Next" Grid.Column="2" Content="Next match"/></Grid>
 <WrapPanel Margin="0,8,0,12"><CheckBox x:Name="OnlyMatches" Content="Show matching segments only" VerticalAlignment="Center" Margin="0,0,18,0"/><TextBlock x:Name="Count" VerticalAlignment="Center"/></WrapPanel>
 </StackPanel>
 <DockPanel DockPanel.Dock="Bottom" Margin="0,12,0,0"><Button x:Name="OpenSource" DockPanel.Dock="Right" Content="Open selected timestamp"/><TextBlock Text="Select a segment to open its source. Double-click also opens YouTube." TextWrapping="Wrap" VerticalAlignment="Center"/></DockPanel>
@@ -38,6 +38,10 @@ function Show-CorpusTranscriptWindow {
     $window=[Windows.Markup.XamlReader]::Load([Xml.XmlNodeReader]::new($layout))
     if($Owner){$window.Owner=$Owner}
     $ui=@{};foreach($name in @('VideoTitle','VideoDetail','FindText','Previous','Next','OnlyMatches','Count','Segments','OpenSource')){$ui[$name]=$window.FindName($name)}
+    $window.Add_PreviewKeyDown({param($sender,$e)
+        if($e.Key -eq 'F' -and ([Windows.Input.Keyboard]::Modifiers -band [Windows.Input.ModifierKeys]::Control)){$null=$ui.FindText.Focus();$ui.FindText.SelectAll();$e.Handled=$true}
+        elseif($e.Key -eq 'F3'){$button=if([Windows.Input.Keyboard]::Modifiers -band [Windows.Input.ModifierKeys]::Shift){$ui.Previous}else{$ui.Next};if($button.IsEnabled){$button.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))};$e.Handled=$true}
+    })
     Set-CorpusButtonIcon $ui.OpenSource YouTube
     $ui.VideoTitle.Text=$Video.VideoTitle
     $window.Title='Transcript | '+$Video.VideoTitle

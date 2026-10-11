@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param([int[]]$Sizes=@(12000,50000,100000))
 $ErrorActionPreference='Stop'
 $project=Split-Path $PSScriptRoot -Parent
@@ -146,7 +146,7 @@ function script:Invoke-CorpusOperation {
         }
     }
     $gcMode=[Runtime.GCSettings]::LatencyMode
-    try {Show-CorpusWindow $root -SkipDependencies -SmokeTest -SmokeQueueCheck $check -SmokeQueueAdapter $adapter -SmokeWindowReady $ready -UserSettingsPath (Join-Path $root fixture-settings.json) | Out-Null}
+    try {Show-CorpusWindow $root -SkipDependencies -SmokeTest -SmokeQueueCheck $check -SmokeQueueAdapter $adapter -SmokeWindowReady $ready -SmokeQueueConfirmation {param($dialog) $dialog.FindName('ConfirmCleanup').RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))} -UserSettingsPath (Join-Path $root fixture-settings.json) | Out-Null}
     finally {if($test.Probe){$test.Probe.Dispose()};if($test.Producer){$test.Producer.Dispose()}}
     if([Runtime.GCSettings]::LatencyMode -ne $gcMode){throw 'Window did not restore the host garbage-collection policy'}
     $reports+=$test.Report;$test.Report | Format-List

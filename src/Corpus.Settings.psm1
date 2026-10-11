@@ -28,8 +28,11 @@ function Get-CorpusChannelIndicator {
         }elseif(Get-CorpusProperty $Job PartialImport $false){$activity='Partial channel import';$symbol='◐'}
         elseif($Job.Status -in @('Partial','Failed','Cancelled')){$activity=$Job.Status;$symbol='!'}
     }elseif((Get-CorpusProperty $Channel Status '') -in @('Partial','Failed','Cancelled')){$activity=$Channel.Status;$symbol='!'}
+    $queueActivity=if($locked){if($Job.Status -eq 'Cancelling'){'Cancelling'}elseif($running -or $Job.Status -eq 'Discovering'){'Syncing'}elseif($Queue.Paused){'Paused'}else{'Queued'}}else{'Idle'}
+    $result=if($locked){if(Get-CorpusProperty $Job PartialImport $false){'In progress (partial selection)'}else{'In progress'}}elseif($Job){if(Get-CorpusProperty $Job PartialImport $false){'Partial channel import'}else{[string]$Job.Status}}else{[string](Get-CorpusProperty $Channel Status 'Not imported')}
+    $freshnessText=if($last){"$(if($freshness -eq 'Up to date'){'Recent'}else{$freshness}) - last full sync $(([datetime]$last).ToLocalTime().ToString('yyyy-MM-dd HH:mm'))"}else{'Never fully synced'}
     $label="$symbol $(if($activity){$activity+' · '})$freshness$(if($locked){' · 🔒'})"
-    [pscustomobject]@{Label=$label;Freshness=$freshness;Locked=$locked;Hint="$(if($locked){'Editing locked while this channel has queued work. '})Last successful full sync: $(if($last){$last}else{'Never'}). Latest activity: $(if($activity){$activity}else{'Idle'}). Freshness threshold: $StaleDays days."}
+    [pscustomobject]@{Activity=$queueActivity;Result=$result;FreshnessText=$freshnessText;Label=$label;Freshness=$freshness;Locked=$locked;Hint="$(if($locked){'Editing locked while this channel has queued work. '})Last successful full sync: $(if($last){$last}else{'Never'}). Latest activity: $(if($activity){$activity}else{'Idle'}). Freshness threshold: $StaleDays days."}
 }
 function Resolve-CorpusStoragePath {
     param([string]$Path)

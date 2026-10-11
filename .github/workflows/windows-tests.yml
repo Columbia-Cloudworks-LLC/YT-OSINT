@@ -54,3 +54,10 @@ jobs:
       - name: Exercise live queue sorting, priority and About
         shell: powershell
         run: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-QueueUxIntegration.ps1
+
+      - name: Exercise priority UX feedback and cleanup confirmations
+        shell: powershell
+        run: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-PriorityUxIntegration.ps1
+      - name: Exercise unified search and remaining UX
+        shell: powershell
+        run: powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-RemainingUxIntegration.ps1
