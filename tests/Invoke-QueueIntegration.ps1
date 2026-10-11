@@ -60,7 +60,7 @@ $check={
         }
         6 {
             if(@($state.Queue.Items | Where-Object VideoId -eq 'xyzDEF12_-3').Count){throw 'Pending item was not removed.'}
-            $ui.Query.Text='anything';Click $ui.Search;$state.QueueTestStage=7
+            $ui.SearchMode.SelectedIndex=1;$ui.Query.Text='anything';Click $ui.Search;$state.QueueTestStage=7
         }
         7 {
             if($ui.SearchGrid.Visibility -ne 'Visible'){throw 'Corpus search did not finish while downloading.'}

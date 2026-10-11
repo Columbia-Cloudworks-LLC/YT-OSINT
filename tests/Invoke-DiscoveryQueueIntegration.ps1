@@ -40,13 +40,13 @@ $check={
     switch($state.DiscoveryTestStage){
         0 {
             $ui.QueueTab.IsSelected=$true
-            if((Label) -ne 'Start' -or $ui.ContainsKey('QueuePause') -or $ui.ContainsKey('QueueCancel')){throw 'Expected one Start/Pause control'}
+            if((Label) -ne 'List channel videos' -or $ui.ContainsKey('QueuePause') -or $ui.ContainsKey('QueueCancel')){throw 'Expected one Start/Pause control'}
             if([Windows.Controls.Grid]::GetColumn($ui.QueueToggle) -ne 1){throw 'Queue control is not on the footer right'}
             if($ui.QueueToggle.Content.Children[0] -isnot [Windows.Controls.Image] -or $ui.QueueClear.Content.Children[0] -isnot [Windows.Controls.Image]){throw 'Queue action icons are missing'}
             if($ui.QueueClear.Content.Children[0].Source.Drawing -isnot [Windows.Media.DrawingGroup]){throw 'History cleanup must use the broom icon'}
             if($ui.QueueClearAll.Content.Children[0].Source.Drawing.Pen.Brush.Color.ToString() -ne '#FFC52A35'){throw 'Clear queue must use the red X'}
             $actions=$ui.QueueClear.Parent.Children
-            if($actions.IndexOf($ui.QueueClearAll) -ne $actions.IndexOf($ui.QueueClear)+1){throw 'Clear queue must be beside Clear finished'}
+            if($actions.IndexOf($ui.QueueClearAll) -ne $actions.IndexOf($ui.QueueClearHistory)+1){throw 'Clear queue must be beside Clear finished'}
             Click $ui.QueueToggle;$state.DiscoveryTestStage=1
         }
         1 {
@@ -61,13 +61,13 @@ $check={
         }
         3 {
             if($state.QueueWorker){return}
-            if((Label) -ne 'Start' -or $state.Queue.SyncJobs[1].Status -ne 'Pending' -or $ui.QueueProgress.Value -ne 1){throw 'Paused discovery lost its progress'}
+            if((Label) -ne 'List channel videos' -or $state.Queue.SyncJobs[1].Status -ne 'Pending' -or $ui.QueueProgress.Value -ne 1){throw 'Paused discovery lost its progress'}
             Click $ui.QueueToggle;$state.DiscoveryTestStage=35
         }
         35 {
             if($state.QueueWorker -or $ui.QueueGrid.Items.Count -ne 3){return}
             if(Test-Path (Join-Path $root started.txt)){throw 'Review pause allowed a download'}
-            if(-not $state.Queue.AwaitingReview -or $ui.QueueStatus.Text -notmatch 'Review discovered videos'){throw 'Discovery review state is missing'}
+            if((Label) -ne 'Capture queued videos' -or $ui.QueueActivity.Text -notmatch 'Ready for review'){throw 'Review next action is unclear'};if(-not $state.Queue.AwaitingReview -or $ui.QueueStatus.Text -notmatch 'Review discovered videos'){throw 'Discovery review state is missing'}
             if(-not $ui.HeaderArtwork.Source -or $ui.BrandHeader.ActualHeight -ne 104){throw 'Branded header failed to load at the intended height'}
             $column=@($ui.QueueGrid.Columns | Where-Object Header -eq 'Est. Publish Date')[0]
             $ui.QueueGrid.SortColumn($column)
@@ -91,7 +91,7 @@ $check={
         5 {
             if($ui.QueueGrid.Items.Count -ne 7){return}
             if(@($ui.QueueGrid.Items | Where-Object {-not $_.StatusGlyph -or -not $_.StatusColor}).Count){throw 'A queue status has no badge'}
-            Click $ui.QueueClear;$state.DiscoveryTestStage=6
+            Click $ui.QueueClearHistory;$state.DiscoveryTestStage=6
         }
         6 {
             if($ui.QueueGrid.Items.Count -ne 3 -or @($ui.QueueGrid.Items | Where-Object Status -notin @('Pending','Running')).Count){throw 'Clear finished retained terminal rows'}
@@ -104,13 +104,13 @@ $check={
         }
         8 {
             if($state.QueueWorker){return}
-            if((Label) -ne 'Start' -or @($state.Queue.Items | Where-Object Status -eq Pending).Count -ne 2){throw 'Pause started another item'}
+            if((Label) -ne 'Resume capture' -or @($state.Queue.Items | Where-Object Status -eq Pending).Count -ne 2){throw 'Pause started another item'}
             Click $ui.QueueToggle;$state.DiscoveryTestStage=9
         }
         9 {
             if($state.QueueWorker){return}
             if(@($state.Queue.SyncJobs | Where-Object Status -ne Partial).Count){throw 'Cleared failures turned into successful syncs'}
-            Click $ui.QueueClear;$state.DiscoveryTestStage=10
+            Click $ui.QueueClearHistory;$state.DiscoveryTestStage=10
         }
         10 {
             if($ui.QueueGrid.Items.Count -or $ui.QueueToggle.IsEnabled -or @($state.Queue.SyncJobs | Where-Object Status -in @('Pending','Discovering','Downloading')).Count){throw 'Clear left visible or hidden pending work'}
@@ -118,7 +118,7 @@ $check={
         }
     }
 }
-Show-CorpusWindow $root -SkipDependencies -SmokeTest -SmokeQueueCheck $check -SmokeQueueAdapter $adapter
+Show-CorpusWindow $root -SkipDependencies -SmokeTest -SmokeQueueCheck $check -SmokeQueueAdapter $adapter -SmokeQueueConfirmation {param($dialog) $dialog.FindName('ConfirmCleanup').RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))}
 'Discovery queue GUI: discovery barrier, two-phase progress, Start/Pause/Pausing, colored badges, clear all terminal states and preserved sync outcomes passed.'
 
 # A second isolated window clears while enumeration is blocked in the local adapter.
@@ -149,7 +149,7 @@ $clearCheck={
         }
     }
 }
-Show-CorpusWindow $root -SkipDependencies -SmokeTest -SmokeQueueCheck $clearCheck -SmokeQueueAdapter $adapter -UserSettingsPath (Join-Path $root fixture-settings.json)
+Show-CorpusWindow $root -SkipDependencies -SmokeTest -SmokeQueueCheck $clearCheck -SmokeQueueAdapter $adapter -SmokeQueueConfirmation {param($dialog) $dialog.FindName('ConfirmCleanup').RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))} -UserSettingsPath (Join-Path $root fixture-settings.json)
 $q=Initialize-CorpusQueue $root
 if($q.Items.Count -or -not $q.Paused -or @($q.SyncJobs | Where-Object Status -ne Cancelled).Count){throw 'Restart restored cleared work'}
 'Clear queue GUI: active discovery cancelled, remaining channel jobs cancelled, no downloads or refilled rows, and empty paused recovery passed.'

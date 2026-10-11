@@ -419,6 +419,17 @@ Describe 'Clear finished history without losing sync results' {
         foreach($id in @('a','b')){Write-CorpusJson (Join-Path $root "data/normalized/channels/$id.json") ([pscustomobject]@{ChannelId=$id;LastSync='2026-09-01T00:00:00Z';Status='Downloading';TranscriptCount=0;WithoutTranscripts=0;Failures=0;MembersOnlySkipped=0})}
         Write-CorpusJson (Join-Path $root data/queue.json) $q
     }
+    It 'preserves failed and cancelled rows during successful cleanup and keeps shared counts idempotent' {
+        Update-CorpusQueue $root ClearSuccessful
+        $q=Get-CorpusQueue $root
+        ($q.Items.Status -join ',') | Should Be 'Pending,Running,Failed,Cancelled'
+        foreach($job in $q.SyncJobs){$job.ClearedResults.Completed | Should Be 1;$job.ClearedResults.Skipped | Should Be 1;$job.ClearedResults.Failed | Should Be 0;$job.ClearedResults.Cancelled | Should Be 0}
+        Update-CorpusQueue $root ClearSuccessful
+        (Get-CorpusQueue $root).SyncJobs[0].ClearedResults.Completed | Should Be 1
+        Update-CorpusQueue $root ClearFinished
+        (Get-CorpusQueue $root).SyncJobs[0].ClearedResults.Failed | Should Be 1
+        (Get-CorpusQueue $root).Items.Count | Should Be 2
+    }
     It 'clears every terminal state immediately even when referenced by active jobs' {
         Update-CorpusQueue $root ClearFinished
         $q=Get-CorpusQueue $root;$q.Items.Count | Should Be 2

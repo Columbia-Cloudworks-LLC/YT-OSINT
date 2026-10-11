@@ -1,13 +1,182 @@
 {
-  "schemaVersion": 1,
-  "subjects": [
-    {
-      "id": "mo",
-      "name": "Mo",
-      "channels": [
-        { "url": "https://www.youtube.com/@atmoio" },
-        { "url": "https://www.youtube.com/@lessbitter" }
-      ]
-    }
-  ]
+    "schemaVersion":  1,
+    "subjects":  [
+                     {
+                         "id":  "mo",
+                         "name":  "Mo Bitar",
+                         "channels":  [
+                                          {
+                                              "url":  "https://www.youtube.com/@atmoio"
+                                          },
+                                          {
+                                              "url":  "https://www.youtube.com/@lessbitter"
+                                          }
+                                      ]
+                     },
+                     {
+                         "id":  "1ef85301b9d545deacde08f674100763",
+                         "name":  "Theo",
+                         "channels":  [
+                                          {
+                                              "url":  "https://www.youtube.com/@t3dotgg"
+                                          }
+                                      ]
+                     },
+                     {
+                         "id":  "9092798c89434534a4ef8c7882d0ab8f",
+                         "name":  "David Shapiro",
+                         "channels":  [
+                                          {
+                                              "url":  "https://www.youtube.com/@DaveShap"
+                                          }
+                                      ]
+                     },
+                     {
+                         "id":  "529474fec0354fd4af29b62637c200c9",
+                         "name":  "ThePrimeagen",
+                         "channels":  [
+                                          {
+                                              "url":  "https://www.youtube.com/@ThePrimeTimeagen"
+                                          },
+                                          {
+                                              "url":  "https://www.youtube.com/@ThePrimeagenHighlights"
+                                          },
+                                          {
+                                              "url":  "https://www.youtube.com/@ThePrimeagen/videos"
+                                          }
+                                      ]
+                     },
+                     {
+                         "id":  "a059edd94de541d5a6df962474c4ccb2",
+                         "name":  "Lex Fridman",
+                         "channels":  [
+                                          {
+                                              "url":  "https://www.youtube.com/@lexfridman"
+                                          }
+                                      ]
+                     },
+                     {
+                         "id":  "978b8c2b9d5a4785a7c713fc210a4ca3",
+                         "name":  "Fireship",
+                         "channels":  [
+                                          {
+                                              "url":  "https://www.youtube.com/@Fireship"
+                                          }
+                                      ]
+                     },
+                     {
+                         "id":  "af6d9d961660475cab5c535c65235239",
+                         "name":  "Kyle Cook",
+                         "channels":  [
+                                          {
+                                              "url":  "https://www.youtube.com/@WebDevSimplified"
+                                          },
+                                          {
+                                              "url":  "https://www.youtube.com/@KyleCookWDS"
+                                          }
+                                      ]
+                     },
+                     {
+                         "id":  "2ce407e098fa4efa80ca74514c0f0dca",
+                         "name":  "Matthew Berman",
+                         "channels":  [
+                                          {
+                                              "url":  "https://www.youtube.com/@matthew_berman"
+                                          }
+                                      ]
+                     },
+                     {
+                         "id":  "7d650fbb3d2748c5bed656d9fec54413",
+                         "name":  "Tech with Tim",
+                         "channels":  [
+                                          {
+                                              "url":  "https://www.youtube.com/@TechWithTim"
+                                          }
+                                      ]
+                     },
+                     {
+                         "id":  "f49a8cf4d9e04b90a634d2d675f953cd",
+                         "name":  "Dan Scott",
+                         "channels":  [
+                                          {
+                                              "url":  "https://www.youtube.com/@BringYourOwnLaptop"
+                                          }
+                                      ]
+                     },
+                     {
+                         "id":  "2c1bbacadc764bd3824a795b10292f70",
+                         "name":  "Matt Wolfe",
+                         "channels":  [
+                                          {
+                                              "url":  "https://www.youtube.com/@mreflow"
+                                          }
+                                      ]
+                     },
+                     {
+                         "id":  "b2f5e9efe7aa4b62b4978f44b0e7bd39",
+                         "name":  "Jason Zhou",
+                         "channels":  [
+                                          {
+                                              "url":  "https://www.youtube.com/@AIJasonZ"
+                                          }
+                                      ]
+                     },
+                     {
+                         "id":  "d5d1897586c14ee9b1da8d4129179ac5",
+                         "name":  "NetworkChuck",
+                         "channels":  [
+                                          {
+                                              "url":  "https://www.youtube.com/@NetworkChuck"
+                                          }
+                                      ]
+                     },
+                     {
+                         "id":  "b2007c91c577400a8a578036a83a453a",
+                         "name":  "Low Level Learning",
+                         "channels":  [
+                                          {
+                                              "url":  "https://www.youtube.com/@LowLevelTV"
+                                          }
+                                      ]
+                     },
+                     {
+                         "id":  "575693aed97a4193acfb0bb47db021d5",
+                         "name":  "Ed Zitron",
+                         "channels":  [
+                                          {
+                                              "url":  "https://www.youtube.com/@BetterOfflinePod"
+                                          }
+                                      ]
+                     },
+                     {
+                         "id":  "e44290880ceb464ca1921a812b0deddb",
+                         "name":  "Gary Marcus",
+                         "channels":  [
+
+                                      ]
+                     },
+                     {
+                         "id":  "7c2439903265488c92b642e76adf387d",
+                         "name":  "Cory Doctorow",
+                         "channels":  [
+
+                                      ]
+                     },
+                     {
+                         "id":  "46b582bc06734dc184d244eed48af02f",
+                         "name":  "Pivot to AI",
+                         "channels":  [
+                                          {
+                                              "url":  "https://www.youtube.com/@PivotToAI"
+                                          }
+                                      ]
+                     },
+                     {
+                         "id":  "182ebadbb93f420ab6317d4bde4e0853",
+                         "name":  "David Heinemeier Hansson",
+                         "channels":  [
+
+                                      ]
+                     }
+                 ]
 }

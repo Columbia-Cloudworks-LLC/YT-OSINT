@@ -80,5 +80,8 @@ Describe 'Channel freshness and activity' {
         $job.Status='Partial';$job.PartialImport=$true
         $indicator=Get-CorpusChannelIndicator $channel $job $queue 7 $now
         $indicator.Label | Should Match 'Partial channel import';$indicator.Freshness | Should Be 'Up to date';$indicator.Locked | Should Be $false
+        $indicator.Activity | Should Be Idle
+        $indicator.Result | Should Be 'Partial channel import'
+        $indicator.FreshnessText | Should Match '^Recent - last full sync '
     }
 }

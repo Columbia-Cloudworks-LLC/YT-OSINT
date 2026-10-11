@@ -14,9 +14,11 @@ powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-Sele
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-DiscoveryQueueIntegration.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-QueuePerformanceIntegration.ps1
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-QueueUxIntegration.ps1
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-PriorityUxIntegration.ps1
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Invoke-RemainingUxIntegration.ps1
 ```
 
-GitHub Actions runs syntax parsing, the fixture suite, and all eight WPF scripts on Windows (the performance script uses 12,000 rows in CI). Tests use `tests/fixtures/config.json`, not the user's live subject configuration. No YouTube requests are made by these checks.
+GitHub Actions runs syntax parsing, the fixture suite, and all ten WPF scripts on Windows (the performance script uses 12,000 rows in CI). Tests use `tests/fixtures/config.json`, not the user's live subject configuration. No YouTube requests are made by these checks.
 
 The fixture suite covers configuration and identity, atomic writes, concurrent subject updates, VTT normalization, subtitle selection, cached transcript reuse, searches, timestamp links, acquisition failures, members-only skips, Excel structure, run accounting, persistent rate-limit scheduling, dependency verification, rollback/recovery, and maintenance locks.
 
@@ -94,9 +96,9 @@ Local validation on 2026-09-27 for branding and date review: PowerShell source p
 
 The fixture suite verifies discovery before even older batch URLs, shared video deduplication across discovered channels, discovery of channels added mid-download, and safe pause/resume between discoveries. Clear-finished tests cover every terminal state, shared active jobs, repeated clearing, persistence/reload, accurate failure totals, preserved previous full-sync timestamps, and successful finalization after successful history is cleared. Progress tests distinguish discovery counts from visible video counts.
 
-`Invoke-DiscoveryQueueIntegration.ps1` tests the actual WPF Start/Pause/Pausing button, its bottom-right placement and action icons, discovery/download progress, every colored row badge, and clearing terminal rows during active downloads. It checks that no channel discovery is left behind the completed downloads and that cleared failures still produce partial channel outcomes.
+`Invoke-DiscoveryQueueIntegration.ps1` tests the actual WPF state-specific capture/Pause/Pausing button, its bottom-right placement and action icons, discovery/download progress, every colored row badge, and clearing terminal rows during active downloads. It checks that no channel discovery is left behind the completed downloads and that cleared failures still produce partial channel outcomes.
 
-It also checks the broom cleanup icon and adjacent red-X Clear queue control. A second isolated window clears during blocked discovery and verifies that discovery stops, remaining channel jobs are cancelled, no video starts, and recovery stays empty and paused. Fixture tests additionally exercise a late successful listing after clearing, shared result accounting, repeated clearing, preserving the current download, and retaining the previous full-sync timestamp for partial outcomes.
+It also checks the broom cleanup icon and red-X Clear queue control beside history cleanup. A second isolated window clears during blocked discovery and verifies that discovery stops, remaining channel jobs are cancelled, no video starts, and recovery stays empty and paused. Fixture tests additionally exercise a late successful listing after clearing, shared result accounting, repeated clearing, preserving the current download, and retaining the previous full-sync timestamp for partial outcomes.
 
 Local validation on 2026-09-27 for Clear queue: source parsing, all 154 fixture tests, and all seven WPF scripts passed. With 12,000 initial rows, the performance check removed 3,000 selected pending rows, then cleared the remaining 7,799 waiting rows while retaining the active download. P95 extra dispatcher delay was 27.0 ms and the maximum was 344.9 ms, within the existing budgets. Acquisition used isolated local adapters.
 
@@ -108,7 +110,7 @@ Local validation on 2026-09-27 for Clear queue: source parsing, all 154 fixture 
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File .\tests\Update-Screenshots.ps1
 ```
 
-This loads the actual application with isolated sample subjects, channels and queue states. It replaces `docs/screenshot.png`, `docs/dependencies.png`, and the Subjects, Channels, Queue, Discovery, Storage, About and expanded queue-filter screenshots under `docs/screenshots/`. No live YouTube requests, dependency release checks, or personal configuration are used. The dependency page intentionally shows unqueried sample rows. Inspect the resulting images for clipping, stale controls, misleading status and private data before committing.
+This loads the actual application with isolated sample subjects, channels and queue states. It replaces all 13 documented images: `docs/screenshot.png`, `docs/dependencies.png`, and the Subjects, Channels, Queue, Discovery, Storage, About, expanded queue-filter, review, clear-confirmation, Corpus and compact-queue screenshots under `docs/screenshots/`. No live YouTube requests, dependency release checks, or personal configuration are used. The dependency page intentionally shows unqueried sample rows. Inspect the resulting images for clipping, stale controls, misleading status and private data before committing.
 
 For this project, a request to make changes includes implementation, tests, all affected documentation, regeneration/review of all documented screenshots, and commit/push. See the repository's `AGENTS.md`.
 
@@ -119,3 +121,23 @@ For this project, a request to make changes includes implementation, tests, all 
 `Invoke-QueueUxIntegration.ps1` opens the actual WPF application against an isolated fixture, checks collapsed/expanded filters and footer/selection placement, verifies the company image and version, changes priority while the first download is held open, and confirms the scheduler's actual acquisition order after release. Completed rows cannot be reprioritized. All acquisitions are simulated; storage, locks, workers and controls are real.
 
 Local validation on 2026-09-27 for live sorting, queue priority and About: final PowerShell source parsing, all **156 fixture tests**, and all **eight WPF integration scripts** passed in Windows PowerShell 5.1. Integrations were run sequentially. The 12,000-row performance fixture retained selection across updates and clearing, removed 3,000 pending rows together, and measured P95 extra dispatcher delay **26.2 ms**, maximum **409.2 ms**, column sort **50.4 ms**, and maximum apply slice **53.6 ms**, within the existing responsiveness budgets. Downloads used local adapters; live YouTube behavior was not tested. All nine documented application screenshots were regenerated from isolated fixture data and visually inspected.
+
+## Priority UX iteration
+
+`Invoke-PriorityUxIntegration.ps1` exercises the real WPF entry-point feedback and Open queue buttons, navigation without starting a paused queue, accessible input names, preservation of failed/cancelled rows during successful cleanup, and both cancel/confirm outcomes in the real cleanup dialogs with affected counts. `Queue.Tests.ps1` verifies idempotent successful cleanup with shared channel results. Discovery integration verifies stage-specific labels and Ready for review. Confirmation test hooks act on the real dialog and are available only in fixture smoke mode.
+
+User acceptance and a full screen-reader/DPI review remain manual checks. No live YouTube requests are needed for these fixtures.
+
+Local priority-UX validation (2026-09-27): all 157 offline fixture tests passed. The 12,000-row WPF performance run passed with P95 extra dispatcher delay 27.3 ms, maximum 328.4 ms, and sorting 53.8 ms. Acquisition used isolated fixtures; no live YouTube requests were made.
+
+All nine WPF integration scripts passed for this iteration, including discovery, concurrent queue editing, subject management, unified scheduling, storage/restart, viewer/search, queue ordering, priority UX, and the performance run above. The priority UX check was rerun after the final feedback wording change.
+
+## Remaining UX iteration
+
+`Invoke-RemainingUxIntegration.ps1` drives both search modes, Enter submission, collapsed-filter summaries, clearing filters without losing the query, date validation, separated channel/global status, contextual queue actions, and the compact 760 x 560 layout. WPF layout transforms simulate 150% and 200% scaling; these do not establish native Windows DPI or screen-reader conformance. Existing viewer, queue-concurrency, discovery, storage/restart and performance scripts remain part of the regression checks.
+
+Acceptance tasks: find a video by its details, find a phrase in its transcript, remove an active filter, identify what a paused channel last accomplished, and manage selected queue items in a small window. Confirm keyboard focus and native display scaling on the target desktop before publishing.
+
+Remaining-UX validation (2026-09-27): all 157 offline tests passed. The 12,000-row performance check passed with 26.3 ms P95 additional dispatcher delay, 271.5 ms maximum, and 45 ms sorting. Fixture acquisition made no YouTube requests.
+
+All ten WPF integration scripts passed sequentially. The remaining-UX integration passed again after the final search-completion message fix. All 13 documented screenshots were regenerated from the real WPF UI with isolated fixtures and visually inspected. Publishing remains deferred for user acceptance testing.

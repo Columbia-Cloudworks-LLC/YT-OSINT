@@ -121,12 +121,12 @@ function Remove-CorpusQueueItems {
     } finally {$lock.Dispose()}
 }
 function Update-CorpusQueue {
-    param([string]$Root,[ValidateSet('Pause','Remove','Retry','ClearFinished','ClearQueue','MoveUp','MoveDown')][string]$Action,[string]$Id='',$RunnerShared=$null)
+    param([string]$Root,[ValidateSet('Pause','Remove','Retry','ClearSuccessful','ClearFinished','ClearQueue','MoveUp','MoveDown')][string]$Action,[string]$Id='',$RunnerShared=$null)
     $lock=Enter-CorpusConfigLock $Root
     try {
         $queue=Get-CorpusQueue $Root
         if($Action -eq 'Pause'){$queue.Paused=$true}
-        elseif($Action -in @('ClearFinished','ClearQueue')){
+        elseif($Action -in @('ClearSuccessful','ClearFinished','ClearQueue')){
             $clearQueue=$Action -eq 'ClearQueue'
             if($clearQueue){
                 $queue.Paused=$true;$queue.AwaitingReview=$false;$queue.DiscoveryJobIds=@()
@@ -138,7 +138,7 @@ function Update-CorpusQueue {
             }
             $jobsById=@{};foreach($job in $queue.SyncJobs){$jobsById[$job.Id]=$job}
             foreach($item in $queue.Items){
-                if($item.Status -eq 'Running' -or ($item.Status -eq 'Pending' -and -not $clearQueue)){continue}
+                if($item.Status -eq 'Running' -or ($item.Status -eq 'Pending' -and -not $clearQueue) -or ($Action -eq 'ClearSuccessful' -and $item.Status -notin @('Completed','Skipped'))){continue}
                 $wasPending=$item.Status -eq 'Pending'
                 $outcome=if($wasPending){'Cancelled'}else{$item.Status}
                 foreach($jobId in $item.JobIds){
@@ -149,7 +149,7 @@ function Update-CorpusQueue {
                     }
                 }
             }
-            $queue.Items=@($queue.Items | Where-Object {$_.Status -eq 'Running' -or (-not $clearQueue -and $_.Status -eq 'Pending')})
+            $queue.Items=@($queue.Items | Where-Object {$_.Status -eq 'Running' -or (-not $clearQueue -and $_.Status -eq 'Pending') -or ($Action -eq 'ClearSuccessful' -and $_.Status -notin @('Completed','Skipped'))})
         }
         else {
             $matches=@($queue.Items | Where-Object Id -eq $Id)

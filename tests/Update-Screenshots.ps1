@@ -11,6 +11,9 @@ $config=[pscustomobject]@{schemaVersion=1;subjects=@(
     [pscustomobject]@{id='technology';name='Technology research';channels=@([pscustomobject]@{url='https://www.youtube.com/@samplecomputing'},[pscustomobject]@{url='https://www.youtube.com/@sampleengineering'})}
 );archivedSubjects=@()}
 Write-CorpusJson (Join-Path $fixtureRoot config.json) $config
+$ctx=New-CorpusContext $fixtureRoot
+$sample=ConvertTo-CorpusVideo ([pscustomobject]@{id='abcDEF12_-3';title='How language models process text';channel='Sample Computing';duration=420;upload_date='20260912'}) technology 'Technology research'
+Save-CorpusVideo $ctx $sample
 $now=[datetime]::UtcNow
 foreach($entry in @(@('UC1234567890123456789012','Sample Computing','https://www.youtube.com/@samplecomputing',-2),@('UC2234567890123456789012','Sample Engineering','https://www.youtube.com/@sampleengineering',-12))){
     $channel=[pscustomobject]@{SubjectId='technology';Subject='Technology research';ChannelId=$entry[0];ChannelName=$entry[1];Url=$entry[2];Urls=@($entry[2]);VideosDiscovered=8;TranscriptCount=3;WithoutTranscripts=1;LastSync=$now.AddDays($entry[3]).ToString('o');LastAttempt=$now.ToString('o');Status='Downloading';Failures=1;MembersOnlySkipped=0}
@@ -48,7 +51,10 @@ $check={
             $window.Height=920
             $ui.QueueBefore.SelectedDate=[datetime]'2024-01-01'
             $ui.SubjectPick.SelectedItem=@($ui.SubjectPick.Items | Where-Object id -eq technology)[0]
-            $ui.Tabs.SelectedIndex=0;$state.ScreenshotStage=1
+            $ui.Tabs.SelectedIndex=0
+            $ui.VideoUrl.Text='https://youtu.be/eigDEF12_-3'
+            $ui.ImportVideo.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))
+            $state.ScreenshotStage=1
         }
         1 {Save-DocumentationScreenshot $window 'screenshots/subjects.png';$ui.Tabs.SelectedIndex=1;$ui.ChannelsGrid.SelectedIndex=0;$state.ScreenshotStage=2}
         2 {
@@ -79,8 +85,32 @@ $check={
             $state.ScreenshotStage=6
         }
         6 {Save-DocumentationScreenshot $window 'dependencies.png';$ui.AboutTab.IsSelected=$true;$state.ScreenshotStage=7}
-        7 {Save-DocumentationScreenshot $window 'screenshots/about.png';$ui.QueueTab.IsSelected=$true;$ui.QueueFilters.IsExpanded=$true;$state.ScreenshotStage=8}
-        8 {Save-DocumentationScreenshot $window 'screenshots/queue-filters.png';$window.Close()}
+        7 {Save-DocumentationScreenshot $window 'screenshots/about.png';$window.Height=1000;$ui.QueueTab.IsSelected=$true;$ui.QueueFilters.IsExpanded=$true;$state.ScreenshotStage=8}
+        8 {
+            Save-DocumentationScreenshot $window 'screenshots/queue-filters.png'
+            $q=Get-CorpusQueue $fixtureRoot;$q.Paused=$true;$q.AwaitingReview=$true
+            foreach($item in $q.Items){if($item.Status -eq 'Pending'){$item.Detail='Waiting for review before capture'}}
+            foreach($job in $q.SyncJobs){$job.Status='Downloading'}
+            Write-CorpusJson (Join-Path $fixtureRoot data/queue.json) $q
+            $ui.QueueFilters.IsExpanded=$false;$state.ScreenshotStage=9
+        }
+        9 {
+            if($ui.QueueActivity.Text -notmatch 'Ready for review'){return}
+            Save-DocumentationScreenshot $window 'screenshots/review.png'
+            $state.ScreenshotStage=10
+            $ui.QueueCleanup.IsExpanded=$true
+            $ui.QueueClearAll.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))
+        }
+        10 {
+            $ui.CorpusTab.IsSelected=$true;$ui.SearchMode.SelectedIndex=0;$ui.Query.Text='language'
+            $ui.SearchSubject.SelectedItem=@($ui.SearchSubject.Items | Where-Object id -eq technology)[0]
+            $ui.Search.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent));$state.ScreenshotStage=11
+        }
+        11 {
+            Save-DocumentationScreenshot $window 'screenshots/corpus.png'
+            $ui.QueueCleanup.IsExpanded=$false;$ui.QueueGrid.SelectedIndex=-1;$ui.QueueTab.IsSelected=$true;$window.Width=760;$window.Height=560;$state.ScreenshotStage=12
+        }
+        12 {Save-DocumentationScreenshot $window 'screenshots/compact-queue.png';$window.Close()}
     }
 }
-Show-CorpusWindow $fixtureRoot -SkipDependencies -SmokeTest -SmokeQueueCheck $check -UserSettingsPath (Join-Path $fixtureRoot 'fixture-settings.json')
+Show-CorpusWindow $fixtureRoot -SkipDependencies -SmokeTest -SmokeQueueCheck $check -UserSettingsPath (Join-Path $fixtureRoot 'fixture-settings.json') -SmokeQueueConfirmation {param($dialog) Save-DocumentationScreenshot $dialog 'screenshots/clear-confirmation.png';$dialog.DialogResult=$false}
